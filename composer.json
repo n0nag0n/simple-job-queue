@@ -1,0 +1,19 @@
+{
+    "name": "n0nag0n/job-queuer",
+    "description": "A simple library for interfacing with other providers that provides plenty of flexibility",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "n0nag0n",
+            "email": "austin@sky-9.com"
+        }
+    ],
+    "minimum-stability": "stable",
+	"require": {},
+	"autoload": {
+        "psr-4": {
+			"n0nag0n\\" : "src/"
+		} 
+    },
+}
