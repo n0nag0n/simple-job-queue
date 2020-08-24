@@ -69,6 +69,9 @@ class Job_Queue {
 		}
 
 		if($this->queue_type === 'mysql') {
+			$Cache = \Cache::instance();
+			$Cache->exists('job-queue-table-check', $exists);
+			if(!empty($exists)) {
 				$table_name = $this->db->quotekey($this->options['mysql']['table_name']);
 				$has_table = !!count($this->db->exec("SHOW COLUMNS FROM {$table_name}"));
 				if(!$has_table) {

@@ -1,5 +1,5 @@
 {
-    "name": "n0nag0n/job-queuer",
+    "name": "n0nag0n/fatfree-job-queue",
     "description": "A simple library for interfacing with other providers that provides plenty of flexibility",
     "type": "library",
     "license": "MIT",
@@ -10,10 +10,12 @@
         }
     ],
     "minimum-stability": "stable",
-	"require": {},
+	"require": {
+        "bcosca/fatfree-core": "^3.7"
+    },
 	"autoload": {
         "psr-4": {
 			"n0nag0n\\" : "src/"
 		} 
-    },
+    }
 }
