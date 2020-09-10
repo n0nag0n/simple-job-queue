@@ -1,17 +1,17 @@
 {
-    "name": "n0nag0n/fatfree-job-queue",
-    "description": "A simple library for interfacing with other providers that provides plenty of flexibility",
+    "name": "n0nag0n/simple-job-queue",
+    "description": "A simple library for interfacing with other job queue providers that gives you plenty of flexibility. Currently supports MySQL",
     "type": "library",
     "license": "MIT",
     "authors": [
         {
             "name": "n0nag0n",
-            "email": "austin@sky-9.com"
+            "email": "acollier21@gmail.com"
         }
     ],
     "minimum-stability": "stable",
 	"require": {
-        "bcosca/fatfree-core": "^3.7"
+        "ext-pdo": "*"
     },
 	"autoload": {
         "psr-4": {

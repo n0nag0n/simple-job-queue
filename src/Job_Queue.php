@@ -6,7 +6,40 @@ use Exception;
 
 class Job_Queue {
 
-	protected $queue_type, $db, $pipeline, $options;
+	/**
+	 * The type of job queue to use
+	 *
+	 * @var string
+	 */
+	protected $queue_type;
+
+	/**
+	 * PDO Connection
+	 *
+	 * @var PDO
+	 */
+	protected $db; 
+
+	/**
+	 * Name of the pipeline to work with
+	 *
+	 * @var string
+	 */
+	protected $pipeline; 
+
+	/**
+	 * Set of options to pass into the job queue
+	 *
+	 * @var array
+	 */
+	protected $options;
+
+	/**
+	 * Array to store various variables and checks
+	 *
+	 * @var string
+	 */
+	protected static $cache;
 
 	public function __construct(string $queue_type = 'mysql', array $options = []) {
 		$this->queue_type = $queue_type;
@@ -69,11 +102,12 @@ class Job_Queue {
 		}
 
 		if($this->queue_type === 'mysql') {
-			$Cache = \Cache::instance();
-			$Cache->exists('job-queue-table-check', $exists);
-			if(!empty($exists)) {
-				$table_name = $this->db->quotekey($this->options['mysql']['table_name']);
-				$has_table = !!count($this->db->exec("SHOW COLUMNS FROM {$table_name}"));
+			$cache =& self::$cache;
+			$exists = isset($cache['job-queue-table-check']);
+			if(empty($exists)) {
+				$table_name = $this->quoteDatabaseKey($this->options['mysql']['table_name']);
+				$statement = $this->db->query("SHOW COLUMNS FROM {$table_name}");
+				$has_table = !!count($statement->fetchAll(PDO::FETCH_ASSOC));
 				if(!$has_table) {
 					$field_type = $this->options['mysql']['use_compression'] ? 'longblob' : 'longtext';
 					$this->db->exec("CREATE TABLE {$table_name}} (
@@ -91,7 +125,7 @@ class Job_Queue {
 						KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
 					);");
 				}
-				$Cache->set('job-queue-table-check', true, 86400);
+				$cache['job-queue-table-check'] = true;
 			}
 		}
 	}
@@ -101,10 +135,10 @@ class Job_Queue {
 
 		switch($this->queue_type) {
 			case 'mysql':
-				$table_name = $this->db->quotekey($this->options['mysql']['table_name']);
+				$table_name = $this->quoteDatabaseKey($this->options['mysql']['table_name']);
 				$field_value = $this->options['mysql']['use_compression'] ? 'COMPRESS(?)' : '?';
 				$delay_date_time = gmdate('Y-m-d H:i:s', strtotime('now +'.$delay.' seconds UTC'));
-				$this->db->exec("INSERT INTO {$table_name} SET
+				$statement = $this->db->prepare("INSERT INTO {$table_name} SET
 					pipeline = ?,
 					payload = {$field_value},
 					added_dt = UTC_TIMESTAMP(),
@@ -113,12 +147,13 @@ class Job_Queue {
 					is_reserved = 0,
 					reserved_dt = NULL,
 					is_buried = 0
-					", [
-						$this->pipeline,
-						$payload,
-						$delay_date_time,
-						$priority
-					]);
+				");
+				$statement->execute([
+					$this->pipeline,
+					$payload,
+					$delay_date_time,
+					$priority
+				]);
 				$job = [];
 				$job['id'] = $this->db->lastInsertId();
 				$job['payload'] = $payload;
@@ -132,13 +167,19 @@ class Job_Queue {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case 'mysql':
-				$table_name = $this->db->quotekey($this->options['mysql']['table_name']);
+				$table_name = $this->quoteDatabaseKey($this->options['mysql']['table_name']);
 				$field = $this->options['mysql']['use_compression'] ? 'UNCOMPRESS(payload) payload' : 'payload';
-				$result = $this->db->exec("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt FROM {$table_name} WHERE pipeline = ? AND send_dt <= UTC_TIMESTAMP() AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) ) ) ORDER BY priority ASC LIMIT 1", [ $this->pipeline ]);
+				$statement = $this->db->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt 
+					FROM {$table_name} 
+					WHERE pipeline = ? AND send_dt <= UTC_TIMESTAMP() AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) ) ) 
+					ORDER BY priority ASC LIMIT 1");
+				$statement->execute([ $this->pipeline ]);
+				$result = $statement->fetchAll(PDO::FETCH_ASSOC);
 				$job = [];
 				if(count($result)) {
 					$job = $result[0];
-					$this->db->exec("UPDATE {$table_name} SET is_reserved = 1, reserved_dt = UTC_TIMESTAMP() WHERE id = ?", [ $job['id'] ]);
+					$statement = $this->db->prepare("UPDATE {$table_name} SET is_reserved = 1, reserved_dt = UTC_TIMESTAMP() WHERE id = ?");
+					$statement->execute([ $job['id'] ]);
 				}
 			break;
 		}
@@ -150,8 +191,9 @@ class Job_Queue {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case 'mysql':
-				$table_name = $this->db->quotekey($this->options['mysql']['table_name']);
-				$this->db->exec("DELETE FROM {$table_name} WHERE id = ?", [ $job['id'] ]);
+				$table_name = $this->quoteDatabaseKey($this->options['mysql']['table_name']);
+				$statement = $this->db->prepare("DELETE FROM {$table_name} WHERE id = ?");
+				$statement->execute([ $job['id'] ]);
 			break;
 		}
 	}
@@ -160,8 +202,9 @@ class Job_Queue {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case 'mysql':
-				$table_name = $this->db->quotekey($this->options['mysql']['table_name']);
-				$this->db->exec("UPDATE {$table_name} SET is_buried = 1, buried_dt = UTC_TIMESTAMP(), is_reserved = 0, reserved_dt = NULL WHERE id = ?", [ $job['id'] ]);
+				$table_name = $this->quoteDatabaseKey($this->options['mysql']['table_name']);
+				$statement = $this->db->prepare("UPDATE {$table_name} SET is_buried = 1, buried_dt = UTC_TIMESTAMP(), is_reserved = 0, reserved_dt = NULL WHERE id = ?");
+				$statement->execute([ $job['id'] ]);
 			break;
 		}
 	}
@@ -170,8 +213,9 @@ class Job_Queue {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case 'mysql':
-				$table_name = $this->db->quotekey($this->options['mysql']['table_name']);
-				$this->db->exec("UPDATE {$table_name} SET is_buried = 0, buried_dt = NULL WHERE id = ?", [ $job['id'] ]);
+				$table_name = $this->quoteDatabaseKey($this->options['mysql']['table_name']);
+				$statement = $this->db->prepare("UPDATE {$table_name} SET is_buried = 0, buried_dt = NULL WHERE id = ?");
+				$statement->execute([ $job['id'] ]);
 			break;
 		}
 	}
@@ -188,5 +232,28 @@ class Job_Queue {
 			case 'mysql':
 				return $job['payload'];
 		}
+	}
+
+	/**
+	*	Return quoted identifier name
+	*	@return string
+	*	@param $key
+	*	@param bool $split
+	 **/
+	protected function quoteDatabaseKey(string $key, bool $split = true): string {
+		$delims=[
+			'sqlite2?|mysql'=>'``',
+			'pgsql|oci'=>'""',
+			'mssql|sqlsrv|odbc|sybase|dblib'=>'[]'
+		];
+		$use='';
+		foreach($delims as $engine=>$delim) {
+			if(preg_match('/'.$engine.'/',$this->engine)) {
+				$use = $delim;
+				break;
+			}
+		}
+		return $use[0].($split ? implode($use[1].'.'.$use[0],explode('.',$key))
+			: $key).$use[1];
 	}
 }

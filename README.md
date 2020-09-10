@@ -1,9 +1,9 @@
-# Fat Free Job Queue
+# Simple PHP Job Queue
 Here's the basics (will fill out later......ha!)
 
 ## Install
 ```bash
-composer require n0nag0n/fatfree-job-queue
+composer require n0nag0n/simple-job-queue
 ```
 
 ## Usage
