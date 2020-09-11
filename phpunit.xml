@@ -1,0 +1,17 @@
+<phpunit bootstrap="vendor/autoload.php" colors="true" executionOrder="random" testdox="true">
+    <testsuites>
+        <testsuite name="unit">
+            <directory>tests/</directory>
+        </testsuite>
+    </testsuites>
+	<filter>
+		<whitelist processUncoveredFilesFromWhitelist="true">
+			<directory suffix=".php">src</directory>
+		</whitelist>
+	</filter>
+	<logging>
+		<log type="coverage-html" target="coverage/html" />
+		<log type="coverage-text" target="php://stdout" />
+		<log type="coverage-clover" target="clover.xml"/>
+	</logging>
+</phpunit>

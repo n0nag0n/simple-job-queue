@@ -32,7 +32,7 @@ class Job_Queue {
 	 *
 	 * @var array
 	 */
-	protected $options;
+	protected $options = [];
 
 	/**
 	 * Array to store various variables and checks
@@ -45,11 +45,27 @@ class Job_Queue {
 		$this->queue_type = $queue_type;
 
 		// set defaults
-		$this->options = $options + [
+		$this->setOptions($options + [
 			'mysql' => [
 				'use_compression' => true
 			]
-		];
+		]);
+	}
+
+	public function setOptions(array $options = []): void {
+		$this->options = $options;
+	}
+
+	public function getOptions(): array {
+		return $this->options;
+	}
+
+	public function setPipeline(string $pipeline): void {
+		$this->pipeline = $pipeline;
+	}
+
+	public function getPipeline(): string {
+		return $this->pipeline;
 	}
 
 	public function addDbConnection(PDO $db) {
@@ -66,6 +82,7 @@ class Job_Queue {
 		$this->pipeline = $pipeline;
 		switch($this->queue_type) {
 			case 'mysql':
+			case 'sqlite':
 				// do nothing
 			break;
 		}
@@ -83,6 +100,7 @@ class Job_Queue {
 		$this->pipeline = $pipeline;
 		switch($this->queue_type) {
 			case 'mysql':
+			case 'sqlite':
 				// do nothing
 			break;
 		}
