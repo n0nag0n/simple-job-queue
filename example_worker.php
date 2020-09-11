@@ -19,8 +19,7 @@
 		try {
 			$result = doSomethingThatDoesSomething($payload);
 
-			$status_code = n0nag0n\EasyCurl::$last_request_info['http_code'];
-			if($status_code >= 200 && $status_code <= 299) {
+			if($result === true) {
 				$Job_Queue->deleteJob($job);
 			} else {
 				$Job_Queue->buryJob($job);
