@@ -9,9 +9,8 @@
 			<directory suffix=".php">src</directory>
 		</whitelist>
 	</filter>
-	<logging>
+	<!-- <logging>
 		<log type="coverage-html" target="coverage/html" />
 		<log type="coverage-text" target="php://stdout" />
-		<log type="coverage-clover" target="clover.xml"/>
-	</logging>
+	</logging> -->
 </phpunit>

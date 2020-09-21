@@ -37,11 +37,22 @@ class Job_Queue {
 	/**
 	 * Array to store various variables and checks
 	 *
-	 * @var string
+	 * @var array
 	 */
-	protected static $cache;
+	protected static $cache = [];
 
+	/**
+	 * The construct
+	 *
+	 * @param string $queue_type - mysql is default
+	 * @param array $options
+	 */
 	public function __construct(string $queue_type = 'mysql', array $options = []) {
+
+		if(empty($queue_type)) {
+			throw new Exception('Queue Type not defined (or defined properly...)');
+		}
+
 		$this->queue_type = $queue_type;
 
 		// set defaults
@@ -52,22 +63,68 @@ class Job_Queue {
 		]);
 	}
 
+	/**
+	 * Sets the options from the construct (or otherwise...)
+	 *
+	 * @param array $options
+	 * @return void
+	 */
 	public function setOptions(array $options = []): void {
 		$this->options = $options;
 	}
 
+	/**
+	 * Returns the options set in the construct (or by set options)
+	 *
+	 * @return array
+	 */
 	public function getOptions(): array {
 		return $this->options;
 	}
 
+	/**
+	 * Sets the pipeline to use
+	 *
+	 * @param string $pipeline
+	 * @return void
+	 */
 	public function setPipeline(string $pipeline): void {
 		$this->pipeline = $pipeline;
 	}
 
+	/**
+	 * Gets the currently used pipeline.
+	 *
+	 * @return string
+	 */
 	public function getPipeline(): string {
 		return $this->pipeline;
 	}
 
+	/**
+	 * Gets the cache
+	 *
+	 * @return array
+	 */
+	public function getCache(): array {
+		return self::$cache;
+	}
+
+	/**
+	 * Drains the internal cache
+	 *
+	 * @return void
+	 */
+	public function flushCache(): void {
+		self::$cache = [];
+	}
+
+	/**
+	 * Adds a PDO db connection for SQLite and MySQL databases
+	 *
+	 * @param PDO $db
+	 * @return void
+	 */
 	public function addDbConnection(PDO $db) {
 		$this->db = $db;
 	}
@@ -106,12 +163,15 @@ class Job_Queue {
 		}
 	}
 
+	/**
+	 * Runs necessary checks to make sure the queue will work properly
+	 *
+	 * @return void
+	 */
 	protected function runPreChecks() {
+
 		if(empty($this->pipeline)) {
 			throw new Exception('Pipeline/Tube needs to be defined first');
-		}
-		if(empty($this->queue_type)) {
-			throw new Exception('Queue Type not defined (or defined properly...)');
 		}
 
 		if(($this->isMysqlQueueType() || $this->isSqliteQueueType()) && empty($this->db)) {
@@ -119,57 +179,18 @@ class Job_Queue {
 		}
 
 		if($this->isMysqlQueueType() || $this->isSqliteQueueType()) {
-			$cache =& self::$cache;
-			$exists = isset($cache['job-queue-table-check']);
-			if(empty($exists)) {
-				$table_name = $this->getSqlTableName();
-				if($this->isMysqlQueueType()) {
-					$statement = $this->db->query("SHOW COLUMNS FROM {$table_name}");
-				} else {
-					$statement = $this->db->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
-					$statement->execute($this->options['sqlite']['table_name']);
-				}
-				
-				$has_table = !!count($statement->fetchAll(PDO::FETCH_ASSOC));
-				if(!$has_table) {
-					if($this->isMysqlQueueType()) {
-						$field_type = $this->options['mysql']['use_compression'] ? 'longblob' : 'longtext';
-						$this->db->exec("CREATE TABLE {$table_name}} (
-							`id` int(11) NOT NULL AUTO_INCREMENT,
-							`pipeline` varchar(500) NOT NULL,
-							`payload` {$field_type} NOT NULL,
-							`added_dt` datetime NOT NULL COMMENT 'In UTC',
-							`send_dt` datetime NOT NULL COMMENT 'In UTC',
-							`priority` int(11) NOT NULL,
-							`is_reserved` tinyint(1) NOT NULL,
-							`reserved_dt` datetime NULL COMMENT 'In UTC',
-							`is_buried` tinyint(1) NOT NULL,
-							`buried_dt` datetime NULL COMMENT 'In UTC',
-							PRIMARY KEY (`id`),
-							KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
-						);");
-					} else {
-						$this->db->exec("CREATE TABLE {$table_name}} (
-							`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-							`pipeline` TEXT NOT NULL,
-							`payload` TEXT NOT NULL,
-							`added_dt` TEXT NOT NULL COMMENT 'In UTC',
-							`send_dt` TEXT NOT NULL COMMENT 'In UTC',
-							`priority` INTEGER NOT NULL,
-							`is_reserved` INTEGER NOT NULL,
-							`reserved_dt` TEXT NULL COMMENT 'In UTC',
-							`is_buried` INTEGER NOT NULL,
-							`buried_dt` TEXT NULL COMMENT 'In UTC',
-							KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
-						);");
-						$this->db->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} (`pipeline`, `send_dt`, `is_buried`, `is_reserved`");
-					}
-				}
-				$cache['job-queue-table-check'] = true;
-			}
+			$this->checkAndIfNecessaryCreateJobQueueTable();
 		}
 	}
 
+	/**
+	 * Adds a new job to the job queue
+	 *
+	 * @param string $payload
+	 * @param integer $delay
+	 * @param integer $priority
+	 * @return void
+	 */
 	public function addJob(string $payload, int $delay = 0, int $priority = 1024) {
 		$this->runPreChecks();
 
@@ -180,16 +201,7 @@ class Job_Queue {
 				$field_value = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'COMPRESS(?)' : '?';
 				$delay_date_time = gmdate('Y-m-d H:i:s', strtotime('now +'.$delay.' seconds UTC'));
 				$added_dt = gmdate('Y-m-d H:i:s');
-				$statement = $this->db->prepare("INSERT INTO {$table_name} SET
-					pipeline = ?,
-					payload = {$field_value},
-					added_dt = ?,
-					send_dt = ?,
-					priority = ?,
-					is_reserved = 0,
-					reserved_dt = NULL,
-					is_buried = 0
-				");
+				$statement = $this->db->prepare("INSERT INTO {$table_name} (pipeline, payload, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried) VALUES (?, {$field_value}, ?, ?, ?, 0, NULL, 0)");
 				$statement->execute([
 					$this->pipeline,
 					$payload,
@@ -197,8 +209,9 @@ class Job_Queue {
 					$delay_date_time,
 					$priority
 				]);
+				
 				$job = [];
-				$job['id'] = $this->db->lastInsertId();
+				$job['id'] = intval($this->db->lastInsertId());
 				$job['payload'] = $payload;
 			break;
 		}
@@ -206,8 +219,14 @@ class Job_Queue {
 		return $job;
 	}
 
+	/**
+	 * Gets the next available job. Sorted by delay and priority
+	 *
+	 * @return mixed 
+	 */
 	public function getNextJob() {
 		$this->runPreChecks();
+		$job = [];
 		switch($this->queue_type) {
 			case 'mysql':
 			case 'sqlite':
@@ -221,9 +240,12 @@ class Job_Queue {
 					ORDER BY priority ASC LIMIT 1");
 				$statement->execute([ $this->pipeline, $send_dt, $reserved_dt ]);
 				$result = $statement->fetchAll(PDO::FETCH_ASSOC);
-				$job = [];
 				if(count($result)) {
-					$job = $result[0];
+					$result = $result[0];
+					$job = [
+						'id' => intval($result['id']),
+						'payload' => $result['payload']
+					];
 					$reserved_dt = gmdate('Y-m-d H:i:s');
 					$statement = $this->db->prepare("UPDATE {$table_name} SET is_reserved = 1, reserved_dt = ? WHERE id = ?");
 					$statement->execute([ $reserved_dt, $job['id'] ]);
@@ -234,6 +256,12 @@ class Job_Queue {
 		return $job;
 	}
 
+	/**
+	 * Deletes a job
+	 *
+	 * @param mixed $job
+	 * @return void
+	 */
 	public function deleteJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
@@ -246,6 +274,12 @@ class Job_Queue {
 		}
 	}
 
+	/**
+	 * Buries (hides) a job
+	 *
+	 * @param mixed $job
+	 * @return void
+	 */
 	public function buryJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
@@ -259,6 +293,12 @@ class Job_Queue {
 		}
 	}
 
+	/**
+	 * Kicks (releases, unburies) job
+	 *
+	 * @param mixed $job
+	 * @return void
+	 */
 	public function kickJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
@@ -271,7 +311,13 @@ class Job_Queue {
 		}
 	}
 
-	public function getJobId($job): int {
+	/**
+	 * Gets the job id from given job
+	 *
+	 * @param mixed $job
+	 * @return mixed
+	 */
+	public function getJobId($job) {
 		switch($this->queue_type) {
 			case 'mysql':
 			case 'sqlite':
@@ -279,6 +325,12 @@ class Job_Queue {
 		}
 	}
 
+	/**
+	 * Gets the job payload from given job
+	 *
+	 * @param mixed $job
+	 * @return string
+	 */
 	public function getJobPayload($job): string {
 		switch($this->queue_type) {
 			case 'mysql':
@@ -294,14 +346,14 @@ class Job_Queue {
 	*	@param bool $split
 	 **/
 	protected function quoteDatabaseKey(string $key, bool $split = true): string {
-		$delims=[
+		$delims = [
 			'sqlite2?|mysql'=>'``',
 			'pgsql|oci'=>'""',
 			'mssql|sqlsrv|odbc|sybase|dblib'=>'[]'
 		];
 		$use='';
 		foreach($delims as $engine=>$delim) {
-			if(preg_match('/'.$engine.'/',$this->engine)) {
+			if(preg_match('/'.$engine.'/',$this->queue_type)) {
 				$use = $delim;
 				break;
 			}
@@ -320,11 +372,62 @@ class Job_Queue {
 
 	protected function getSqlTableName(): string {
 		$table_name = 'job_queue_jobs';
-		if($this->isMysqlQueueType()) {
+		if($this->isMysqlQueueType() && isset($this->options['sqlite']['table_name'])) {
 			$table_name = $this->options['mysql']['table_name'];
-		} else if($this->isSqliteQueueType()) {
+		} else if($this->isSqliteQueueType() && isset($this->options['sqlite']['table_name'])) {
 			$table_name = $this->options['sqlite']['table_name'];
 		}
 		return $this->quoteDatabaseKey($table_name);
+	}
+
+	protected function checkAndIfNecessaryCreateJobQueueTable(): void {
+		$cache =& self::$cache;
+		$exists = isset($cache['job-queue-table-check']);
+		if(empty($exists)) {
+			$table_name = $this->getSqlTableName();
+			if($this->isMysqlQueueType()) {
+				$statement = $this->db->query("SHOW COLUMNS FROM {$table_name}");
+			} else {
+				$statement = $this->db->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
+				$statement->execute([ $table_name ]);
+			}
+			
+			$has_table = !!count($statement->fetchAll(PDO::FETCH_ASSOC));
+			if(!$has_table) {
+				if($this->isMysqlQueueType()) {
+					$field_type = $this->options['mysql']['use_compression'] ? 'longblob' : 'longtext';
+					$this->db->exec("CREATE TABLE {$table_name} (
+						`id` int(11) NOT NULL AUTO_INCREMENT,
+						`pipeline` varchar(500) NOT NULL,
+						`payload` {$field_type} NOT NULL,
+						`added_dt` datetime NOT NULL COMMENT 'In UTC',
+						`send_dt` datetime NOT NULL COMMENT 'In UTC',
+						`priority` int(11) NOT NULL,
+						`is_reserved` tinyint(1) NOT NULL,
+						`reserved_dt` datetime NULL COMMENT 'In UTC',
+						`is_buried` tinyint(1) NOT NULL,
+						`buried_dt` datetime NULL COMMENT 'In UTC',
+						PRIMARY KEY (`id`),
+						KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
+					);");
+				} else {
+					$this->db->exec("CREATE TABLE {$table_name} (
+						'id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+						'pipeline' TEXT NOT NULL,
+						'payload' TEXT NOT NULL,
+						'added_dt' TEXT NOT NULL, -- COMMENT 'In UTC'
+						'send_dt' TEXT NOT NULL, -- COMMENT 'In UTC'
+						'priority' INTEGER NOT NULL,
+						'is_reserved' INTEGER NOT NULL,
+						'reserved_dt' TEXT NULL, -- COMMENT 'In UTC'
+						'is_buried' INTEGER NOT NULL,
+						'buried_dt' TEXT NULL -- COMMENT 'In UTC'
+					);");
+					
+					$this->db->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} ('pipeline', 'send_dt', 'is_buried', 'is_reserved'");
+				}
+			}
+			$cache['job-queue-table-check'] = true;
+		}
 	}
 }
