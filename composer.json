@@ -11,7 +11,8 @@
     ],
     "minimum-stability": "stable",
 	"require": {
-        "ext-pdo": "*"
+        "ext-pdo": "*",
+        "pda/pheanstalk": "^4.0"
     },
 	"autoload": {
         "psr-4": {

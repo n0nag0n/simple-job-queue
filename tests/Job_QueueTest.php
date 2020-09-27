@@ -21,7 +21,7 @@ class Job_QueueTest extends TestCase {
 	public function setUp(): void {
 		$this->pdo = new PDO('sqlite::memory:', 'test', 'test');
 		$this->jq = new Job_Queue('sqlite');
-		$this->jq->addDbConnection($this->pdo);
+		$this->jq->addQueueConnection($this->pdo);
 	}
 
 	public function tearDown(): void {
@@ -83,7 +83,7 @@ class Job_QueueTest extends TestCase {
 			$jq->addJob('');
 			$this->fail('Shouldn\'t have failed');
 		} catch(Exception $e) {
-			$this->assertStringContainsString('You need to add the database connection first friend.', $e->getMessage());
+			$this->assertStringContainsString('You need to add the connection for this queue type via the addQueueConnection() method first.', $e->getMessage());
 		}
 
 		$this->jq->selectPipeline('pipeline');

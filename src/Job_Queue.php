@@ -3,8 +3,13 @@
 namespace n0nag0n;
 use PDO;
 use Exception;
+use Pheanstalk\Pheanstalk;
 
 class Job_Queue {
+
+	const QUEUE_TYPE_MYSQL = 'mysql';
+	const QUEUE_TYPE_SQLITE = 'sqlite';
+	const QUEUE_TYPE_BEANSTALKD = 'beanstalkd';
 
 	/**
 	 * The type of job queue to use
@@ -14,11 +19,11 @@ class Job_Queue {
 	protected $queue_type;
 
 	/**
-	 * PDO Connection
+	 * Generic Connection Holder
 	 *
-	 * @var PDO
+	 * @var mixed
 	 */
-	protected $db; 
+	protected $connection; 
 
 	/**
 	 * Name of the pipeline to work with
@@ -44,10 +49,10 @@ class Job_Queue {
 	/**
 	 * The construct
 	 *
-	 * @param string $queue_type - mysql is default
+	 * @param string $queue_type - self::QUEUE_TYPE_MYSQL is default
 	 * @param array $options
 	 */
-	public function __construct(string $queue_type = 'mysql', array $options = []) {
+	public function __construct(string $queue_type = self::QUEUE_TYPE_MYSQL, array $options = []) {
 
 		if(empty($queue_type)) {
 			throw new Exception('Queue Type not defined (or defined properly...)');
@@ -120,13 +125,13 @@ class Job_Queue {
 	}
 
 	/**
-	 * Adds a PDO db connection for SQLite and MySQL databases
+	 * Adds a generic connection for the queue type selected
 	 *
-	 * @param PDO $db
+	 * @param mixed $db
 	 * @return void
 	 */
-	public function addDbConnection(PDO $db) {
-		$this->db = $db;
+	public function addQueueConnection($connection) {
+		$this->connection = $connection;
 	}
 
 	/**
@@ -138,9 +143,13 @@ class Job_Queue {
 	public function selectPipeline(string $pipeline): Job_Queue {
 		$this->pipeline = $pipeline;
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				// do nothing
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$this->connection->useTube($this->pipeline);
 			break;
 		}
 
@@ -156,9 +165,13 @@ class Job_Queue {
 	public function watchPipeline(string $pipeline) {
 		$this->pipeline = $pipeline;
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				// do nothing
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$this->connection->watch($this->pipeline);
 			break;
 		}
 	}
@@ -174,13 +187,14 @@ class Job_Queue {
 			throw new Exception('Pipeline/Tube needs to be defined first');
 		}
 
-		if(($this->isMysqlQueueType() || $this->isSqliteQueueType()) && empty($this->db)) {
-			throw new Exception('You need to add the database connection first friend.');
+		if(empty($this->connection)) {
+			throw new Exception('You need to add the connection for this queue type via the addQueueConnection() method first.');
 		}
 
 		if($this->isMysqlQueueType() || $this->isSqliteQueueType()) {
 			$this->checkAndIfNecessaryCreateJobQueueTable();
 		}
+
 	}
 
 	/**
@@ -191,28 +205,34 @@ class Job_Queue {
 	 * @param integer $priority
 	 * @return void
 	 */
-	public function addJob(string $payload, int $delay = 0, int $priority = 1024) {
+	public function addJob(string $payload, int $delay = 0, int $priority = 1024, int $time_to_retry = 60) {
 		$this->runPreChecks();
 
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field_value = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'COMPRESS(?)' : '?';
 				$delay_date_time = gmdate('Y-m-d H:i:s', strtotime('now +'.$delay.' seconds UTC'));
 				$added_dt = gmdate('Y-m-d H:i:s');
-				$statement = $this->db->prepare("INSERT INTO {$table_name} (pipeline, payload, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried) VALUES (?, {$field_value}, ?, ?, ?, 0, NULL, 0)");
+				$time_to_retry_dt = gmdate('Y-m-d H:i:s', strtotime('now +'.$time_to_retry.' seconds UTC'));
+				$statement = $this->connection->prepare("INSERT INTO {$table_name} (pipeline, payload, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, attempts, time_to_retry_dt) VALUES (?, {$field_value}, ?, ?, ?, 0, NULL, 0, 0, ?)");
 				$statement->execute([
 					$this->pipeline,
 					$payload,
 					$added_dt,
 					$delay_date_time,
-					$priority
+					$priority,
+					$time_to_retry_dt
 				]);
 				
 				$job = [];
-				$job['id'] = intval($this->db->lastInsertId());
+				$job['id'] = intval($this->connection->lastInsertId());
 				$job['payload'] = $payload;
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$this->connection->put($payload, $priority, $delay, $time_to_retry);
 			break;
 		}
 
@@ -228,17 +248,17 @@ class Job_Queue {
 		$this->runPreChecks();
 		$job = [];
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
 				$send_dt = gmdate('Y-m-d H:i:s');
 				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes UTC'));
-				$statement = $this->db->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt 
+				$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
 					FROM {$table_name} 
-					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= ? ) ) 
+					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= ? ) ) AND (attempts = 0 OR (attempts >= 1 AND time_to_retry_dt <= ?) )
 					ORDER BY priority ASC LIMIT 1");
-				$statement->execute([ $this->pipeline, $send_dt, $reserved_dt ]);
+				$statement->execute([ $this->pipeline, $send_dt, $reserved_dt, $send_dt ]);
 				$result = $statement->fetchAll(PDO::FETCH_ASSOC);
 				if(count($result)) {
 					$result = $result[0];
@@ -247,9 +267,13 @@ class Job_Queue {
 						'payload' => $result['payload']
 					];
 					$reserved_dt = gmdate('Y-m-d H:i:s');
-					$statement = $this->db->prepare("UPDATE {$table_name} SET is_reserved = 1, reserved_dt = ? WHERE id = ?");
+					$statement = $this->connection->prepare("UPDATE {$table_name} SET is_reserved = 1, reserved_dt = ?, attempts = attempts + 1 WHERE id = ?");
 					$statement->execute([ $reserved_dt, $job['id'] ]);
 				}
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$job = $this->connection->reserve();
 			break;
 		}
 
@@ -265,11 +289,15 @@ class Job_Queue {
 	public function deleteJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
-				$statement = $this->db->prepare("DELETE FROM {$table_name} WHERE id = ?");
+				$statement = $this->connection->prepare("DELETE FROM {$table_name} WHERE id = ?");
 				$statement->execute([ $job['id'] ]);
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$this->connection->delete($job);
 			break;
 		}
 	}
@@ -283,12 +311,16 @@ class Job_Queue {
 	public function buryJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$buried_dt = gmdate('Y-m-d H:i:s');
-				$statement = $this->db->prepare("UPDATE {$table_name} SET is_buried = 1, buried_dt = ?, is_reserved = 0, reserved_dt = NULL WHERE id = ?");
+				$statement = $this->connection->prepare("UPDATE {$table_name} SET is_buried = 1, buried_dt = ?, is_reserved = 0, reserved_dt = NULL WHERE id = ?");
 				$statement->execute([ $buried_dt, $job['id'] ]);
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$this->connection->bury($job);
 			break;
 		}
 	}
@@ -302,11 +334,15 @@ class Job_Queue {
 	public function kickJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
-				$statement = $this->db->prepare("UPDATE {$table_name} SET is_buried = 0, buried_dt = NULL WHERE id = ?");
+				$statement = $this->connection->prepare("UPDATE {$table_name} SET is_buried = 0, buried_dt = NULL WHERE id = ?");
 				$statement->execute([ $job['id'] ]);
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$this->connection->kick($job);
 			break;
 		}
 	}
@@ -319,9 +355,13 @@ class Job_Queue {
 	 */
 	public function getJobId($job) {
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				return $job['id'];
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				return $job->getId();
+			break;
 		}
 	}
 
@@ -333,9 +373,13 @@ class Job_Queue {
 	 */
 	public function getJobPayload($job): string {
 		switch($this->queue_type) {
-			case 'mysql':
-			case 'sqlite':
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				return $job['payload'];
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				return $job->getData();
+			break;
 		}
 	}
 
@@ -363,11 +407,15 @@ class Job_Queue {
 	}
 
 	public function isMysqlQueueType(): bool {
-		return $this->queue_type === 'mysql';
+		return $this->queue_type === self::QUEUE_TYPE_MYSQL;
 	}
 
 	public function isSqliteQueueType(): bool {
-		return $this->queue_type === 'sqlite';
+		return $this->queue_type === self::QUEUE_TYPE_SQLITE;
+	}
+
+	public function isBeanstalkdQueueType(): bool {
+		return $this->queue_type === self::QUEUE_TYPE_BEANSTALKD;
 	}
 
 	protected function getSqlTableName(): string {
@@ -386,9 +434,9 @@ class Job_Queue {
 		if(empty($exists)) {
 			$table_name = $this->getSqlTableName();
 			if($this->isMysqlQueueType()) {
-				$statement = $this->db->query("SHOW COLUMNS FROM {$table_name}");
+				$statement = $this->connection->query("SHOW COLUMNS FROM {$table_name}");
 			} else {
-				$statement = $this->db->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
+				$statement = $this->connection->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
 				$statement->execute([ $table_name ]);
 			}
 			
@@ -396,7 +444,7 @@ class Job_Queue {
 			if(!$has_table) {
 				if($this->isMysqlQueueType()) {
 					$field_type = $this->options['mysql']['use_compression'] ? 'longblob' : 'longtext';
-					$this->db->exec("CREATE TABLE {$table_name} (
+					$this->connection->exec("CREATE TABLE {$table_name} (
 						`id` int(11) NOT NULL AUTO_INCREMENT,
 						`pipeline` varchar(500) NOT NULL,
 						`payload` {$field_type} NOT NULL,
@@ -407,11 +455,13 @@ class Job_Queue {
 						`reserved_dt` datetime NULL COMMENT 'In UTC',
 						`is_buried` tinyint(1) NOT NULL,
 						`buried_dt` datetime NULL COMMENT 'In UTC',
+						`attempts` tinyint(4) NOT NULL,
+						`time_to_retry_dt` datetime NULL,
 						PRIMARY KEY (`id`),
 						KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
 					);");
 				} else {
-					$this->db->exec("CREATE TABLE {$table_name} (
+					$this->connection->exec("CREATE TABLE {$table_name} (
 						'id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
 						'pipeline' TEXT NOT NULL,
 						'payload' TEXT NOT NULL,
@@ -421,10 +471,12 @@ class Job_Queue {
 						'is_reserved' INTEGER NOT NULL,
 						'reserved_dt' TEXT NULL, -- COMMENT 'In UTC'
 						'is_buried' INTEGER NOT NULL,
-						'buried_dt' TEXT NULL -- COMMENT 'In UTC'
+						'buried_dt' TEXT NULL, -- COMMENT 'In UTC'
+						'time_to_retry_dt' TEXT NOT NULL,
+						'attempts' INTEGER NOT NULL
 					);");
 					
-					$this->db->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} ('pipeline', 'send_dt', 'is_buried', 'is_reserved'");
+					$this->connection->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} ('pipeline', 'send_dt', 'is_buried', 'is_reserved'");
 				}
 			}
 			$cache['job-queue-table-check'] = true;
