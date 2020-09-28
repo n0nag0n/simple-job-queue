@@ -1,12 +1,12 @@
 # Simple PHP Job Queue
-Here's the basics (will fill out later......ha!)
+I wanted/needed a simple job queue that could be used on a database, but also used with other adapters like beanstalkd/redis/etc if needed. Didn't really see a good option for a standalone job queue for a database.
 
 ## Install
 ```bash
 composer require n0nag0n/simple-job-queue
 ```
 
-## Usage#
+## Usage
 ### Adding a new job
 #### MySQL
 ```php
@@ -23,7 +23,7 @@ $Job_Queue = new Job_Queue('mysql', [
 ]);
 
 $PDO = new PDO('mysql:dbname=testdb;host=127.0.0.1', 'user', 'pass');
-$Job_Queue->addDbConnection($PDO);
+$Job_Queue->addQueueConnection($PDO);
 
 $Job_Queue->selectPipeline('send_important_emails');
 $Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => 'string' ]));
@@ -43,7 +43,23 @@ $Job_Queue = new Job_Queue('sqlite', [
 ]);
 
 $PDO = new PDO('sqlite:example.db');
-$Job_Queue->addDbConnection($PDO);
+$Job_Queue->addQueueConnection($PDO);
+
+$Job_Queue->selectPipeline('send_important_emails');
+$Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => 'string' ]));
+```
+
+#### Beanstalkd
+```php
+<?php
+
+use n0nag0n\Job_Queue
+
+// default is mysql based job queue
+$Job_Queue = new Job_Queue('beanstalkd');
+
+$pheanstalk = Pheanstalk\Pheanstalk::create('127.0.0.1');
+$Job_Queue->addQueueConnection($pheanstalk);
 
 $Job_Queue->selectPipeline('send_important_emails');
 $Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => 'string' ]));
@@ -53,12 +69,12 @@ $Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => '
 See `example_worker.php` for file or see below:
 ```php
 <?php
-	$Job_Queue = new Job_Queue('mysql');
-	$Job_Queue->addDbConnection($f3->db);
-	$Job_Queue = $f3->job_queue;
+	$Job_Queue = new n0nag0n\Job_Queue('mysql');
+	$PDO = new PDO('mysql:dbname=testdb;host=127.0.0.1', 'user', 'pass');
+	$Job_Queue->addQueueConnection($PDO);
 	$Job_Queue->watchPipeline('some_cool_pipeline_name');
 	while(true) {
-		$job = $Job_Queue->getNextJob();
+		$job = $Job_Queue->getNextJobAndReserve();
 		if(empty($job)) {
 			// adjust to whatever makes you sleep better at night
 			usleep(500000);
@@ -67,8 +83,6 @@ See `example_worker.php` for file or see below:
 
 		echo "Processing {$job['id']}\n";
 		$payload = json_decode($job['payload'], true);
-		$new_payload = $payload;
-		unset($new_payload['webhook_url']);
 
 		try {
 			$result = doSomethingThatDoesSomething($payload);
@@ -76,6 +90,7 @@ See `example_worker.php` for file or see below:
 			if($result === true) {
 				$Job_Queue->deleteJob($job);
 			} else {
+				// this takes it out of the ready queue and puts it in another queue that can be picked up and "kicked" later.
 				$Job_Queue->buryJob($job);
 			}
 		} catch(Exception $e) {
@@ -86,3 +101,9 @@ See `example_worker.php` for file or see below:
 
 ### Handling long processes
 Supervisord is going to be your jam. Look up the many, many articles on how to implement this.
+
+### Testing
+PHPUnit Tests with sqlite3 examples for the time being.
+```
+vendor/bin/phpunit
+```
