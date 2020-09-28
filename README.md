@@ -75,8 +75,9 @@ See `example_worker.php` for file or see below:
 	$Job_Queue->watchPipeline('some_cool_pipeline_name');
 	while(true) {
 		$job = $Job_Queue->getNextJobAndReserve();
+
+		// adjust to whatever makes you sleep better at night (for database queues only, beanstalkd does not need this if statement)
 		if(empty($job)) {
-			// adjust to whatever makes you sleep better at night
 			usleep(500000);
 			continue;
 		}
