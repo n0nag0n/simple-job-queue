@@ -171,7 +171,7 @@ class Job_Queue {
 			break;
 
 			case self::QUEUE_TYPE_BEANSTALKD:
-				$this->connection->watch($this->pipeline);
+				$this->connection->watch($this->pipeline)->ignore('default');
 			break;
 		}
 	}
@@ -232,7 +232,8 @@ class Job_Queue {
 			break;
 
 			case self::QUEUE_TYPE_BEANSTALKD:
-				$this->connection->put($payload, $priority, $delay, $time_to_retry);
+				$job = $this->connection->put($payload, $priority, $delay, $time_to_retry);
+
 			break;
 		}
 
@@ -240,11 +241,11 @@ class Job_Queue {
 	}
 
 	/**
-	 * Gets the next available job. Sorted by delay and priority
+	 * Gets the next available job and reserves it. Sorted by delay and priority
 	 *
 	 * @return mixed 
 	 */
-	public function getNextJob() {
+	public function getNextJobAndReserve() {
 		$this->runPreChecks();
 		$job = [];
 		switch($this->queue_type) {
@@ -274,6 +275,45 @@ class Job_Queue {
 
 			case self::QUEUE_TYPE_BEANSTALKD:
 				$job = $this->connection->reserve();
+			break;
+		}
+
+		return $job;
+	}
+
+	/**
+	 * Gets the next available job. Sorted by delay and priority
+	 * Requires `selectPipeline()` to be set.
+	 *
+	 * @return mixed 
+	 */
+	public function getNextBuriedJob() {
+		$this->runPreChecks();
+		$job = [];
+		switch($this->queue_type) {
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_SQLITE:
+				$table_name = $this->getSqlTableName();
+				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
+				$send_dt = gmdate('Y-m-d H:i:s');
+				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes UTC'));
+				$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
+					FROM {$table_name} 
+					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 1
+					ORDER BY priority ASC LIMIT 1");
+				$statement->execute([ $this->pipeline, $send_dt, $reserved_dt, $send_dt ]);
+				$result = $statement->fetchAll(PDO::FETCH_ASSOC);
+				if(count($result)) {
+					$result = $result[0];
+					$job = [
+						'id' => intval($result['id']),
+						'payload' => $result['payload']
+					];
+				}
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$job = $this->connection->peekBuried();
 			break;
 		}
 
@@ -342,7 +382,7 @@ class Job_Queue {
 			break;
 
 			case self::QUEUE_TYPE_BEANSTALKD:
-				$this->connection->kick($job);
+				$this->connection->kickJob($job);
 			break;
 		}
 	}

@@ -110,26 +110,26 @@ class Job_QueueTest extends TestCase {
 		$this->assertGreaterThan($result['id'], $result2['id']);
 	}
 
-	public function testSqliteGetNextJob():void {
+	public function testSqliteAndReserve():void {
 		$this->jq->selectPipeline('pipeline');
 		$result = $this->jq->addJob('{"somethingcool":true}');
 
-		$job = $this->jq->getNextJob();
+		$job = $this->jq->getNextJobAndReserve();
 		$this->assertSame($result, $job);
 
 		// The other job is already reserved
-		$new_job = $this->jq->getNextJob();
+		$new_job = $this->jq->getNextJobAndReserve();
 		$this->assertSame([], $new_job);
 
 		// test priority
 		$this->jq->addJob('{"priority":20}', 0, 20);
 		$this->jq->addJob('{"priority":10}', 0, 10);
 		$this->jq->addJob('{"priority":30}', 0, 30);
-		$priority_job = $this->jq->getNextJob();
+		$priority_job = $this->jq->getNextJobAndReserve();
 		$this->assertSame('{"priority":10}', $priority_job['payload']);
-		$priority_job = $this->jq->getNextJob();
+		$priority_job = $this->jq->getNextJobAndReserve();
 		$this->assertSame('{"priority":20}', $priority_job['payload']);
-		$priority_job = $this->jq->getNextJob();
+		$priority_job = $this->jq->getNextJobAndReserve();
 		$this->assertSame('{"priority":30}', $priority_job['payload']);
 	}
 
@@ -137,7 +137,7 @@ class Job_QueueTest extends TestCase {
 		$this->jq->selectPipeline('pipeline');
 		$job = $this->jq->addJob('{"somethingcool":true}');
 		$this->jq->deleteJob($job);
-		$next_job = $this->jq->getNextJob();
+		$next_job = $this->jq->getNextJobAndReserve();
 		$this->assertSame([], $next_job);
 	}
 
@@ -145,7 +145,7 @@ class Job_QueueTest extends TestCase {
 		$this->jq->selectPipeline('pipeline');
 		$job = $this->jq->addJob('{"somethingcool":true}');
 		$this->jq->buryJob($job);
-		$next_job = $this->jq->getNextJob();
+		$next_job = $this->jq->getNextJobAndReserve();
 		$this->assertSame([], $next_job);
 	}
 
@@ -153,11 +153,11 @@ class Job_QueueTest extends TestCase {
 		$this->jq->selectPipeline('pipeline');
 		$job = $this->jq->addJob('{"somethingcool":true}');
 		$this->jq->buryJob($job);
-		$next_job = $this->jq->getNextJob();
+		$next_job = $this->jq->getNextJobAndReserve();
 		$this->assertSame([], $next_job);
 
 		$this->jq->kickJob($job);
-		$next_job = $this->jq->getNextJob();
+		$next_job = $this->jq->getNextJobAndReserve();
 		$this->assertSame('{"somethingcool":true}', $next_job['payload']);
 	}
 
