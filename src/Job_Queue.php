@@ -474,7 +474,9 @@ class Job_Queue {
 		if(empty($exists)) {
 			$table_name = $this->getSqlTableName();
 			if($this->isMysqlQueueType()) {
-				$statement = $this->connection->query("SHOW COLUMNS FROM {$table_name}");
+				// Doesn't like this in a prepared statement...
+				$escaped_table_name = $this->connection->quote($table_name);
+				$statement = $this->connection->query("SHOW TABLES LIKE {$escaped_table_name}");
 			} else {
 				$statement = $this->connection->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
 				$statement->execute([ $table_name ]);
