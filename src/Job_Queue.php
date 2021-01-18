@@ -486,7 +486,7 @@ class Job_Queue {
 			if(!$has_table) {
 				if($this->isMysqlQueueType()) {
 					$field_type = $this->options['mysql']['use_compression'] ? 'longblob' : 'longtext';
-					$this->connection->exec("CREATE TABLE {$table_name} (
+					$this->connection->exec("CREATE TABLE IF NOT EXISTS {$table_name} (
 						`id` int(11) NOT NULL AUTO_INCREMENT,
 						`pipeline` varchar(500) NOT NULL,
 						`payload` {$field_type} NOT NULL,
@@ -503,7 +503,7 @@ class Job_Queue {
 						KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
 					);");
 				} else {
-					$this->connection->exec("CREATE TABLE {$table_name} (
+					$this->connection->exec("CREATE TABLE IF NOT EXISTS {$table_name} (
 						'id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
 						'pipeline' TEXT NOT NULL,
 						'payload' TEXT NOT NULL,
