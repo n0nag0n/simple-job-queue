@@ -460,7 +460,7 @@ class Job_Queue {
 
 	protected function getSqlTableName(): string {
 		$table_name = 'job_queue_jobs';
-		if($this->isMysqlQueueType() && isset($this->options['sqlite']['table_name'])) {
+		if($this->isMysqlQueueType() && isset($this->options['mysql']['table_name'])) {
 			$table_name = $this->options['mysql']['table_name'];
 		} else if($this->isSqliteQueueType() && isset($this->options['sqlite']['table_name'])) {
 			$table_name = $this->options['sqlite']['table_name'];
