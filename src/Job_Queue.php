@@ -518,7 +518,7 @@ class Job_Queue {
 						'attempts' INTEGER NOT NULL
 					);");
 					
-					$this->connection->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} ('pipeline', 'send_dt', 'is_buried', 'is_reserved'");
+					$this->connection->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} ('pipeline', 'send_dt', 'is_buried', 'is_reserved')");
 				}
 			}
 			$cache['job-queue-table-check'] = true;
