@@ -213,9 +213,9 @@ class Job_Queue {
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field_value = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'COMPRESS(?)' : '?';
-				$delay_date_time = gmdate('Y-m-d H:i:s', strtotime('now +'.$delay.' seconds UTC'));
+				$delay_date_time = gmdate('Y-m-d H:i:s', strtotime('now +'.$delay.' seconds'));
 				$added_dt = gmdate('Y-m-d H:i:s');
-				$time_to_retry_dt = gmdate('Y-m-d H:i:s', strtotime('now +'.$time_to_retry.' seconds UTC'));
+				$time_to_retry_dt = gmdate('Y-m-d H:i:s', strtotime('now +'.$time_to_retry.' seconds'));
 				$statement = $this->connection->prepare("INSERT INTO {$table_name} (pipeline, payload, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, attempts, time_to_retry_dt) VALUES (?, {$field_value}, ?, ?, ?, 0, NULL, 0, 0, ?)");
 				$statement->execute([
 					$this->pipeline,
@@ -254,7 +254,7 @@ class Job_Queue {
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
 				$send_dt = gmdate('Y-m-d H:i:s');
-				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes UTC'));
+				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes'));
 				$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
 					FROM {$table_name} 
 					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= ? ) ) AND (attempts = 0 OR (attempts >= 1 AND time_to_retry_dt <= ?) )
@@ -296,7 +296,7 @@ class Job_Queue {
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
 				$send_dt = gmdate('Y-m-d H:i:s');
-				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes UTC'));
+				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes'));
 				$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
 					FROM {$table_name} 
 					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 1
