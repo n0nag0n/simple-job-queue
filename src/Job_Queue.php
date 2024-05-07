@@ -8,6 +8,7 @@ use Pheanstalk\Pheanstalk;
 class Job_Queue {
 
 	const QUEUE_TYPE_MYSQL = 'mysql';
+  const QUEUE_TYPE_PGSQL = 'pgsql';
 	const QUEUE_TYPE_SQLITE = 'sqlite';
 	const QUEUE_TYPE_BEANSTALKD = 'beanstalkd';
 
@@ -46,12 +47,13 @@ class Job_Queue {
 	 */
 	protected static $cache = [];
 
-	/**
-	 * The construct
-	 *
-	 * @param string $queue_type - self::QUEUE_TYPE_MYSQL is default
-	 * @param array $options
-	 */
+  /**
+   * The construct
+   *
+   * @param string $queue_type - self::QUEUE_TYPE_MYSQL is default
+   * @param array $options
+   * @throws Exception
+   */
 	public function __construct(string $queue_type = self::QUEUE_TYPE_MYSQL, array $options = []) {
 
 		if(empty($queue_type)) {
@@ -127,7 +129,7 @@ class Job_Queue {
 	/**
 	 * Adds a generic connection for the queue type selected
 	 *
-	 * @param mixed $db
+	 * @param mixed $connection
 	 * @return void
 	 */
 	public function addQueueConnection($connection) {
@@ -144,6 +146,7 @@ class Job_Queue {
 		$this->pipeline = $pipeline;
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				// do nothing
 			break;
@@ -165,8 +168,9 @@ class Job_Queue {
 	public function watchPipeline(string $pipeline) {
 		$this->pipeline = $pipeline;
 		switch($this->queue_type) {
-			case self::QUEUE_TYPE_MYSQL:
-			case self::QUEUE_TYPE_SQLITE:
+      case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
+      case self::QUEUE_TYPE_SQLITE:
 				// do nothing
 			break;
 
@@ -176,11 +180,12 @@ class Job_Queue {
 		}
 	}
 
-	/**
-	 * Runs necessary checks to make sure the queue will work properly
-	 *
-	 * @return void
-	 */
+  /**
+   * Runs necessary checks to make sure the queue will work properly
+   *
+   * @return void
+   * @throws Exception
+   */
 	protected function runPreChecks() {
 
 		if(empty($this->pipeline)) {
@@ -191,25 +196,28 @@ class Job_Queue {
 			throw new Exception('You need to add the connection for this queue type via the addQueueConnection() method first.');
 		}
 
-		if($this->isMysqlQueueType() || $this->isSqliteQueueType()) {
+		if($this->isMysqlQueueType() || $this->isPgsqlQueueType() || $this->isSqliteQueueType()) {
 			$this->checkAndIfNecessaryCreateJobQueueTable();
 		}
 
 	}
 
-	/**
-	 * Adds a new job to the job queue
-	 *
-	 * @param string $payload
-	 * @param integer $delay
-	 * @param integer $priority
-	 * @return void
-	 */
+  /**
+   * Adds a new job to the job queue
+   *
+   * @param string $payload
+   * @param integer $delay
+   * @param integer $priority
+   * @param integer $time_to_retry
+   * @return array []
+   * @throws Exception
+   */
 	public function addJob(string $payload, int $delay = 0, int $priority = 1024, int $time_to_retry = 60) {
 		$this->runPreChecks();
 
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field_value = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'COMPRESS(?)' : '?';
@@ -240,16 +248,18 @@ class Job_Queue {
 		return $job;
 	}
 
-	/**
-	 * Gets the next available job and reserves it. Sorted by delay and priority
-	 *
-	 * @return mixed 
-	 */
+  /**
+   * Gets the next available job and reserves it. Sorted by delay and priority
+   *
+   * @return array
+   * @throws Exception
+   */
 	public function getNextJobAndReserve() {
 		$this->runPreChecks();
 		$job = [];
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
@@ -281,17 +291,19 @@ class Job_Queue {
 		return $job;
 	}
 
-	/**
-	 * Gets the next available job. Sorted by delay and priority
-	 * Requires `selectPipeline()` to be set.
-	 *
-	 * @return mixed 
-	 */
+  /**
+   * Gets the next available job. Sorted by delay and priority
+   * Requires `selectPipeline()` to be set.
+   *
+   * @return array
+   * @throws Exception
+   */
 	public function getNextBuriedJob() {
 		$this->runPreChecks();
 		$job = [];
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
@@ -320,16 +332,18 @@ class Job_Queue {
 		return $job;
 	}
 
-	/**
-	 * Deletes a job
-	 *
-	 * @param mixed $job
-	 * @return void
-	 */
+  /**
+   * Deletes a job
+   *
+   * @param mixed $job
+   * @return void
+   * @throws Exception
+   */
 	public function deleteJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$statement = $this->connection->prepare("DELETE FROM {$table_name} WHERE id = ?");
@@ -342,16 +356,18 @@ class Job_Queue {
 		}
 	}
 
-	/**
-	 * Buries (hides) a job
-	 *
-	 * @param mixed $job
-	 * @return void
-	 */
+  /**
+   * Buries (hides) a job
+   *
+   * @param mixed $job
+   * @return void
+   * @throws Exception
+   */
 	public function buryJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$buried_dt = gmdate('Y-m-d H:i:s');
@@ -365,16 +381,18 @@ class Job_Queue {
 		}
 	}
 
-	/**
-	 * Kicks (releases, unburies) job
-	 *
-	 * @param mixed $job
-	 * @return void
-	 */
+  /**
+   * Kicks (releases, unburies) job
+   *
+   * @param mixed $job
+   * @return void
+   * @throws Exception
+   */
 	public function kickJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$statement = $this->connection->prepare("UPDATE {$table_name} SET is_buried = 0, buried_dt = NULL WHERE id = ?");
@@ -396,12 +414,12 @@ class Job_Queue {
 	public function getJobId($job) {
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				return $job['id'];
 
 			case self::QUEUE_TYPE_BEANSTALKD:
 				return $job->getId();
-			break;
 		}
 	}
 
@@ -409,17 +427,17 @@ class Job_Queue {
 	 * Gets the job payload from given job
 	 *
 	 * @param mixed $job
-	 * @return string
+	 * @return mixed
 	 */
-	public function getJobPayload($job): string {
+	public function getJobPayload($job) {
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
+      case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				return $job['payload'];
 
 			case self::QUEUE_TYPE_BEANSTALKD:
 				return $job->getData();
-			break;
 		}
 	}
 
@@ -450,6 +468,10 @@ class Job_Queue {
 		return $this->queue_type === self::QUEUE_TYPE_MYSQL;
 	}
 
+  public function isPgsqlQueueType(): bool {
+    return $this->queue_type === self::QUEUE_TYPE_PGSQL;
+  }
+
 	public function isSqliteQueueType(): bool {
 		return $this->queue_type === self::QUEUE_TYPE_SQLITE;
 	}
@@ -462,7 +484,9 @@ class Job_Queue {
 		$table_name = 'job_queue_jobs';
 		if($this->isMysqlQueueType() && isset($this->options['mysql']['table_name'])) {
 			$table_name = $this->options['mysql']['table_name'];
-		} else if($this->isSqliteQueueType() && isset($this->options['sqlite']['table_name'])) {
+		} else if($this->isPgsqlQueueType() && isset($this->options['pgsql']['table_name'])) {
+      $table_name = $this->options['pgsql']['table_name'];
+    } else if($this->isSqliteQueueType() && isset($this->options['sqlite']['table_name'])) {
 			$table_name = $this->options['sqlite']['table_name'];
 		}
 		return $this->quoteDatabaseKey($table_name);
@@ -477,14 +501,17 @@ class Job_Queue {
 				// Doesn't like this in a prepared statement...
 				$escaped_table_name = $this->connection->quote($table_name);
 				$statement = $this->connection->query("SHOW TABLES LIKE {$escaped_table_name}");
-			} else {
+			} else if($this->isPgsqlQueueType()) {
+        $escaped_table_name = $this->connection->quote($table_name);
+        $statement = $this->connection->query("SELECT * FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema' and tablename like {$escaped_table_name}");
+      } else {
 				$statement = $this->connection->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
 				$statement->execute([ $table_name ]);
 			}
 			
 			$has_table = !!count($statement->fetchAll(PDO::FETCH_ASSOC));
 			if(!$has_table) {
-				if($this->isMysqlQueueType()) {
+				if($this->isMysqlQueueType() or $this->isPgsqlQueueType()) {
 					$field_type = $this->options['mysql']['use_compression'] ? 'longblob' : 'longtext';
 					$this->connection->exec("CREATE TABLE IF NOT EXISTS {$table_name} (
 						`id` int(11) NOT NULL AUTO_INCREMENT,
