@@ -511,7 +511,7 @@ class Job_Queue {
 			
 			$has_table = !!count($statement->fetchAll(PDO::FETCH_ASSOC));
 			if(!$has_table) {
-				if($this->isMysqlQueueType() or $this->isPgsqlQueueType()) {
+				if($this->isMysqlQueueType()) {
 					$field_type = $this->options['mysql']['use_compression'] ? 'longblob' : 'longtext';
 					$this->connection->exec("CREATE TABLE IF NOT EXISTS {$table_name} (
 						`id` int(11) NOT NULL AUTO_INCREMENT,
@@ -530,22 +530,23 @@ class Job_Queue {
 						KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
 					);");
 				} else {
+          $field_type = $this->isSqliteQueueType() ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'serial';
 					$this->connection->exec("CREATE TABLE IF NOT EXISTS {$table_name} (
-						'id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-						'pipeline' TEXT NOT NULL,
-						'payload' TEXT NOT NULL,
-						'added_dt' TEXT NOT NULL, -- COMMENT 'In UTC'
-						'send_dt' TEXT NOT NULL, -- COMMENT 'In UTC'
-						'priority' INTEGER NOT NULL,
-						'is_reserved' INTEGER NOT NULL,
-						'reserved_dt' TEXT NULL, -- COMMENT 'In UTC'
-						'is_buried' INTEGER NOT NULL,
-						'buried_dt' TEXT NULL, -- COMMENT 'In UTC'
-						'time_to_retry_dt' TEXT NOT NULL,
-						'attempts' INTEGER NOT NULL
+						id {$field_type} NOT NULL,
+						pipeline TEXT NOT NULL,
+						payload TEXT NOT NULL,
+						added_dt TEXT NOT NULL, -- COMMENT 'In UTC'
+						send_dt TEXT NOT NULL, -- COMMENT 'In UTC'
+						priority INTEGER NOT NULL,
+						is_reserved INTEGER NOT NULL,
+						reserved_dt TEXT NULL, -- COMMENT 'In UTC'
+						is_buried INTEGER NOT NULL,
+						buried_dt TEXT NULL, -- COMMENT 'In UTC'
+						time_to_retry_dt TEXT NOT NULL,
+						attempts INTEGER NOT NULL
 					);");
 					
-					$this->connection->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} ('pipeline', 'send_dt', 'is_buried', 'is_reserved')");
+					$this->connection->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} (pipeline, send_dt, is_buried, is_reserved)");
 				}
 			}
 			$cache['job-queue-table-check'] = true;
