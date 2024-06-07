@@ -8,7 +8,7 @@ use Pheanstalk\Pheanstalk;
 class Job_Queue {
 
 	const QUEUE_TYPE_MYSQL = 'mysql';
-  const QUEUE_TYPE_PGSQL = 'pgsql';
+	const QUEUE_TYPE_PGSQL = 'pgsql';
 	const QUEUE_TYPE_SQLITE = 'sqlite';
 	const QUEUE_TYPE_BEANSTALKD = 'beanstalkd';
 
@@ -146,7 +146,7 @@ class Job_Queue {
 		$this->pipeline = $pipeline;
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				// do nothing
 			break;
@@ -217,7 +217,7 @@ class Job_Queue {
 
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field_value = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'COMPRESS(?)' : '?';
@@ -259,7 +259,7 @@ class Job_Queue {
 		$job = [];
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
@@ -303,7 +303,7 @@ class Job_Queue {
 		$job = [];
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
@@ -343,7 +343,7 @@ class Job_Queue {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$statement = $this->connection->prepare("DELETE FROM {$table_name} WHERE id = ?");
@@ -367,7 +367,7 @@ class Job_Queue {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$buried_dt = gmdate('Y-m-d H:i:s');
@@ -392,7 +392,7 @@ class Job_Queue {
 		$this->runPreChecks();
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$statement = $this->connection->prepare("UPDATE {$table_name} SET is_buried = 0, buried_dt = NULL WHERE id = ?");
@@ -414,7 +414,7 @@ class Job_Queue {
 	public function getJobId($job) {
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				return $job['id'];
 
@@ -432,7 +432,7 @@ class Job_Queue {
 	public function getJobPayload($job) {
 		switch($this->queue_type) {
 			case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				return $job['payload'];
 
@@ -546,7 +546,7 @@ class Job_Queue {
 						attempts INTEGER NOT NULL
 					);");
 					
-					$this->connection->exec("CREATE INDEX pipeline_send_dt_is_buried_is_reserved ON {$table_name} (pipeline, send_dt, is_buried, is_reserved)");
+					$this->connection->exec("CREATE INDEX IF NOT EXISTS pipeline_send_dt_is_buried_is_reserved ON {$table_name} (pipeline, send_dt, is_buried, is_reserved)");
 				}
 			}
 			$cache['job-queue-table-check'] = true;
