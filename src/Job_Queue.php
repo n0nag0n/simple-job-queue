@@ -47,13 +47,13 @@ class Job_Queue {
 	 */
 	protected static $cache = [];
 
-  /**
-   * The construct
-   *
-   * @param string $queue_type - self::QUEUE_TYPE_MYSQL is default
-   * @param array $options
-   * @throws Exception
-   */
+	/**
+	 * The construct
+	 *
+	 * @param string $queue_type - self::QUEUE_TYPE_MYSQL is default
+	 * @param array $options
+	 * @throws Exception
+	 */
 	public function __construct(string $queue_type = self::QUEUE_TYPE_MYSQL, array $options = []) {
 
 		if(empty($queue_type)) {
@@ -168,9 +168,9 @@ class Job_Queue {
 	public function watchPipeline(string $pipeline) {
 		$this->pipeline = $pipeline;
 		switch($this->queue_type) {
-      case self::QUEUE_TYPE_MYSQL:
-      case self::QUEUE_TYPE_PGSQL:
-      case self::QUEUE_TYPE_SQLITE:
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_SQLITE:
 				// do nothing
 			break;
 
@@ -180,12 +180,12 @@ class Job_Queue {
 		}
 	}
 
-  /**
-   * Runs necessary checks to make sure the queue will work properly
-   *
-   * @return void
-   * @throws Exception
-   */
+ 	/**
+	 * Runs necessary checks to make sure the queue will work properly
+	 *
+	 * @return void
+	 * @throws Exception
+	 */
 	protected function runPreChecks() {
 
 		if(empty($this->pipeline)) {
@@ -202,16 +202,16 @@ class Job_Queue {
 
 	}
 
-  /**
-   * Adds a new job to the job queue
-   *
-   * @param string $payload
-   * @param integer $delay
-   * @param integer $priority
-   * @param integer $time_to_retry
-   * @return array []
-   * @throws Exception
-   */
+ 	/**
+	 * Adds a new job to the job queue
+	 *
+	 * @param string $payload
+	 * @param integer $delay
+	 * @param integer $priority
+	 * @param integer $time_to_retry
+	 * @return array []
+	 * @throws Exception
+	 */
 	public function addJob(string $payload, int $delay = 0, int $priority = 1024, int $time_to_retry = 60) {
 		$this->runPreChecks();
 
@@ -248,12 +248,12 @@ class Job_Queue {
 		return $job;
 	}
 
-  /**
-   * Gets the next available job and reserves it. Sorted by delay and priority
-   *
-   * @return array
-   * @throws Exception
-   */
+ 	/**
+	 * Gets the next available job and reserves it. Sorted by delay and priority
+	 *
+	 * @return array
+	 * @throws Exception
+	 */
 	public function getNextJobAndReserve() {
 		$this->runPreChecks();
 		$job = [];
@@ -291,13 +291,13 @@ class Job_Queue {
 		return $job;
 	}
 
-  /**
-   * Gets the next available job. Sorted by delay and priority
-   * Requires `selectPipeline()` to be set.
-   *
-   * @return array
-   * @throws Exception
-   */
+ 	/**
+	 * Gets the next available job. Sorted by delay and priority
+	 * Requires `selectPipeline()` to be set.
+	 *
+	 * @return array
+	 * @throws Exception
+	 */
 	public function getNextBuriedJob() {
 		$this->runPreChecks();
 		$job = [];
@@ -332,13 +332,13 @@ class Job_Queue {
 		return $job;
 	}
 
-  /**
-   * Deletes a job
-   *
-   * @param mixed $job
-   * @return void
-   * @throws Exception
-   */
+	/**
+	 * Deletes a job
+	 *
+	 * @param mixed $job
+	 * @return void
+	 * @throws Exception
+	 */
 	public function deleteJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
@@ -356,13 +356,13 @@ class Job_Queue {
 		}
 	}
 
-  /**
-   * Buries (hides) a job
-   *
-   * @param mixed $job
-   * @return void
-   * @throws Exception
-   */
+	/**
+	 * Buries (hides) a job
+	 *
+	 * @param mixed $job
+	 * @return void
+	 * @throws Exception
+	 */
 	public function buryJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
@@ -381,13 +381,13 @@ class Job_Queue {
 		}
 	}
 
-  /**
-   * Kicks (releases, unburies) job
-   *
-   * @param mixed $job
-   * @return void
-   * @throws Exception
-   */
+	/**
+	 * Kicks (releases, unburies) job
+	 *
+	 * @param mixed $job
+	 * @return void
+	 * @throws Exception
+	 */
 	public function kickJob($job): void {
 		$this->runPreChecks();
 		switch($this->queue_type) {
@@ -442,11 +442,11 @@ class Job_Queue {
 	}
 
 	/**
-	*	Return quoted identifier name
-	*	@return string
-	*	@param $key
-	*	@param bool $split
-	 **/
+	 * Return quoted identifier name
+	 * @return string
+	 * @param $key
+	 * @param bool $split
+	 */
 	protected function quoteDatabaseKey(string $key, bool $split = true): string {
 		$delims = [
 			'sqlite2?|mysql'=>'``',
@@ -468,9 +468,9 @@ class Job_Queue {
 		return $this->queue_type === self::QUEUE_TYPE_MYSQL;
 	}
 
-  public function isPgsqlQueueType(): bool {
-    return $this->queue_type === self::QUEUE_TYPE_PGSQL;
-  }
+	public function isPgsqlQueueType(): bool {
+		return $this->queue_type === self::QUEUE_TYPE_PGSQL;
+	}
 
 	public function isSqliteQueueType(): bool {
 		return $this->queue_type === self::QUEUE_TYPE_SQLITE;
@@ -485,8 +485,8 @@ class Job_Queue {
 		if($this->isMysqlQueueType() && isset($this->options['mysql']['table_name'])) {
 			$table_name = $this->options['mysql']['table_name'];
 		} else if($this->isPgsqlQueueType() && isset($this->options['pgsql']['table_name'])) {
-      $table_name = $this->options['pgsql']['table_name'];
-    } else if($this->isSqliteQueueType() && isset($this->options['sqlite']['table_name'])) {
+			$table_name = $this->options['pgsql']['table_name'];
+		} else if($this->isSqliteQueueType() && isset($this->options['sqlite']['table_name'])) {
 			$table_name = $this->options['sqlite']['table_name'];
 		}
 		return $this->quoteDatabaseKey($table_name);
@@ -502,9 +502,9 @@ class Job_Queue {
 				$escaped_table_name = $this->connection->quote($table_name);
 				$statement = $this->connection->query("SHOW TABLES LIKE {$escaped_table_name}");
 			} else if($this->isPgsqlQueueType()) {
-        $escaped_table_name = $this->connection->quote($table_name);
-        $statement = $this->connection->query("SELECT * FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema' and tablename like {$escaped_table_name}");
-      } else {
+				$escaped_table_name = $this->connection->quote($table_name);
+				$statement = $this->connection->query("SELECT * FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema' and tablename like {$escaped_table_name}");
+			} else {
 				$statement = $this->connection->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
 				$statement->execute([ $table_name ]);
 			}
@@ -530,7 +530,7 @@ class Job_Queue {
 						KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
 					);");
 				} else {
-          $field_type = $this->isSqliteQueueType() ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'serial';
+					$field_type = $this->isSqliteQueueType() ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'serial';
 					$this->connection->exec("CREATE TABLE IF NOT EXISTS {$table_name} (
 						id {$field_type} NOT NULL,
 						pipeline TEXT NOT NULL,
