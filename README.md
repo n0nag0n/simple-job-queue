@@ -29,6 +29,26 @@ $Job_Queue->selectPipeline('send_important_emails');
 $Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => 'string' ]));
 ```
 
+#### PostgreSQL
+```php
+<?php
+
+use n0nag0n\Job_Queue
+
+// default is mysql based job queue
+$Job_Queue = new Job_Queue('pgsql', [
+	'pgsql' => [
+		'table_name' => 'new_table_name', // default is job_queue_jobs
+	]
+]);
+
+$PDO = new PDO('pgsql:dbname=testdb;host=127.0.0.1', 'user', 'pass');
+$Job_Queue->addQueueConnection($PDO);
+
+$Job_Queue->selectPipeline('send_important_emails');
+$Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => 'string' ]));
+```
+
 #### SQLite3
 ```php
 <?php
@@ -72,7 +92,7 @@ See `example_worker.php` for file or see below:
 	$Job_Queue = new n0nag0n\Job_Queue('mysql');
 	$PDO = new PDO('mysql:dbname=testdb;host=127.0.0.1', 'user', 'pass');
 	$Job_Queue->addQueueConnection($PDO);
-	$Job_Queue->watchPipeline('some_cool_pipeline_name');
+	$Job_Queue->watchPipeline('send_important_emails');
 	while(true) {
 		$job = $Job_Queue->getNextJobAndReserve();
 
