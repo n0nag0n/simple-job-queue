@@ -7,6 +7,9 @@ composer require n0nag0n/simple-job-queue
 ```
 
 ## Usage
+
+In order for this to work, you need a way to add jobs to the queue and a way to process the jobs (a worker). Below are examples of how to add a job to the queue and how to process the job.
+
 ### Adding a new job
 #### MySQL
 ```php
