@@ -22,7 +22,7 @@ class Job_Queue {
 	/**
 	 * Generic Connection Holder
 	 *
-	 * @var mixed
+	 * @var mixed|Pheanstalk|PDO
 	 */
 	protected $connection; 
 
@@ -308,7 +308,6 @@ class Job_Queue {
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
 				$send_dt = gmdate('Y-m-d H:i:s');
-				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes'));
 				$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
 					FROM {$table_name} 
 					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 1
@@ -529,6 +528,7 @@ class Job_Queue {
 						PRIMARY KEY (`id`),
 						KEY `pipeline_send_dt_is_buried_is_reserved` (`pipeline`(75), `send_dt`, `is_buried`, `is_reserved`)
 					);");
+				// pgsql and sqlite
 				} else {
 					$field_type = $this->isSqliteQueueType() ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'serial';
 					$this->connection->exec("CREATE TABLE IF NOT EXISTS {$table_name} (
