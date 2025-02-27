@@ -313,7 +313,7 @@ class Job_Queue {
 					FROM {$table_name} 
 					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 1
 					ORDER BY priority ASC LIMIT 1");
-				$statement->execute([ $this->pipeline, $send_dt, $reserved_dt, $send_dt ]);
+				$statement->execute([ $this->pipeline, $send_dt ]);
 				$result = $statement->fetchAll(PDO::FETCH_ASSOC);
 				if(count($result)) {
 					$result = $result[0];

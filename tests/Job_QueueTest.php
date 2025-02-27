@@ -174,4 +174,12 @@ class Job_QueueTest extends TestCase {
 		$payload = $this->jq->getJobPayload($job);
 		$this->assertSame($job['payload'], $payload);
 	}
+
+	public function testSqliteGetNextBuriedJob() {
+		$this->jq->selectPipeline('pipeline');
+		$job = $this->jq->addJob('{"somethingcool":true}');
+		$this->jq->buryJob($job);
+		$buried_job = $this->jq->getNextBuriedJob();
+		$this->assertSame($job['id'], $buried_job['id']);
+	}
 }
