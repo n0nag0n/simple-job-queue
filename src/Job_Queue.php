@@ -3,6 +3,7 @@
 namespace n0nag0n;
 use PDO;
 use Exception;
+use PDOException;
 use Pheanstalk\Pheanstalk;
 
 class Job_Queue {
@@ -210,7 +211,7 @@ class Job_Queue {
 	 * @param integer $priority
 	 * @param integer $time_to_retry
 	 * @return array []
-	 * @throws Exception
+	 * @throws PDOException
 	 */
 	public function addJob(string $payload, int $delay = 0, int $priority = 1024, int $time_to_retry = 60) {
 		$this->runPreChecks();
@@ -252,7 +253,7 @@ class Job_Queue {
 	 * Gets the next available job and reserves it. Sorted by delay and priority
 	 *
 	 * @return array
-	 * @throws Exception
+	 * @throws PDOException
 	 */
 	public function getNextJobAndReserve() {
 		$this->runPreChecks();
@@ -265,25 +266,43 @@ class Job_Queue {
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
 				$send_dt = gmdate('Y-m-d H:i:s');
 				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes'));
-				$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
-					FROM {$table_name} 
-					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= ? ) ) AND (attempts = 0 OR (attempts >= 1 AND time_to_retry_dt <= ?) )
-					ORDER BY priority ASC LIMIT 1");
-				$statement->execute([ $this->pipeline, $send_dt, $reserved_dt, $send_dt ]);
-				$result = $statement->fetchAll(PDO::FETCH_ASSOC);
-				if(count($result)) {
-					$result = $result[0];
-					$job = [
-						'id' => intval($result['id']),
-						'payload' => $result['payload']
-					];
-					$reserved_dt = gmdate('Y-m-d H:i:s');
-					$statement = $this->connection->prepare("UPDATE {$table_name} SET is_reserved = 1, reserved_dt = ?, attempts = attempts + 1 WHERE id = ?");
-					$statement->execute([ $reserved_dt, $job['id'] ]);
+				
+				// Start a transaction to prevent race conditions
+				$this->connection->beginTransaction();
+				
+				try {
+					// FOR UPDATE locks the row, preventing other connections from selecting it for update
+					$lockClause = $this->isSqliteQueueType() ? '' : 'FOR UPDATE';
+					
+					$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
+						FROM {$table_name} 
+						WHERE pipeline = ? AND send_dt <= ? AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= ? ) ) AND (attempts = 0 OR (attempts >= 1 AND time_to_retry_dt <= ?) )
+						ORDER BY priority ASC LIMIT 1 {$lockClause}");
+					$statement->execute([ $this->pipeline, $send_dt, $reserved_dt, $send_dt ]);
+					$result = $statement->fetchAll(PDO::FETCH_ASSOC);
+					
+					if(count($result)) {
+						$result = $result[0];
+						$job = [
+							'id' => intval($result['id']),
+							'payload' => $result['payload']
+						];
+						$reserved_dt = gmdate('Y-m-d H:i:s');
+						$statement = $this->connection->prepare("UPDATE {$table_name} SET is_reserved = 1, reserved_dt = ?, attempts = attempts + 1 WHERE id = ?");
+						$statement->execute([ $reserved_dt, $job['id'] ]);
+					}
+					
+					// Commit the transaction
+					$this->connection->commit();
+				} catch (PDOException $e) {
+					// Rollback the transaction in case of error
+					$this->connection->rollBack();
+					error_log($e->getMessage());
 				}
 			break;
 
 			case self::QUEUE_TYPE_BEANSTALKD:
+				// Beanstalkd's reserve method already handles race conditions
 				$job = $this->connection->reserve();
 			break;
 		}
@@ -296,7 +315,7 @@ class Job_Queue {
 	 * Requires `selectPipeline()` to be set.
 	 *
 	 * @return array
-	 * @throws Exception
+	 * @throws PDOException
 	 */
 	public function getNextBuriedJob() {
 		$this->runPreChecks();
@@ -308,18 +327,33 @@ class Job_Queue {
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
 				$send_dt = gmdate('Y-m-d H:i:s');
-				$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
-					FROM {$table_name} 
-					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 1
-					ORDER BY priority ASC LIMIT 1");
-				$statement->execute([ $this->pipeline, $send_dt ]);
-				$result = $statement->fetchAll(PDO::FETCH_ASSOC);
-				if(count($result)) {
-					$result = $result[0];
-					$job = [
-						'id' => intval($result['id']),
-						'payload' => $result['payload']
-					];
+				
+				// Start a transaction to prevent race conditions
+				$this->connection->beginTransaction();
+				
+				try {
+					$lockClause = $this->isSqliteQueueType() ? '' : 'FOR UPDATE';
+					
+					$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
+						FROM {$table_name} 
+						WHERE pipeline = ? AND send_dt <= ? AND is_buried = 1
+						ORDER BY priority ASC LIMIT 1 {$lockClause}");
+					$statement->execute([ $this->pipeline, $send_dt ]);
+					$result = $statement->fetchAll(PDO::FETCH_ASSOC);
+					if(count($result)) {
+						$result = $result[0];
+						$job = [
+							'id' => intval($result['id']),
+							'payload' => $result['payload']
+						];
+					}
+					
+					// Commit the transaction
+					$this->connection->commit();
+				} catch (PDOException $e) {
+					// Rollback the transaction in case of error
+					$this->connection->rollBack();
+					error_log($e->getMessage());
 				}
 			break;
 
@@ -336,7 +370,7 @@ class Job_Queue {
 	 *
 	 * @param mixed $job
 	 * @return void
-	 * @throws Exception
+	 * @throws PDOException
 	 */
 	public function deleteJob($job): void {
 		$this->runPreChecks();
@@ -345,8 +379,20 @@ class Job_Queue {
 			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
-				$statement = $this->connection->prepare("DELETE FROM {$table_name} WHERE id = ?");
-				$statement->execute([ $job['id'] ]);
+				
+				// Begin transaction
+				$this->connection->beginTransaction();
+				
+				try {
+					$statement = $this->connection->prepare("DELETE FROM {$table_name} WHERE id = ?");
+					$statement->execute([ $job['id'] ]);
+					
+					// Commit transaction
+					$this->connection->commit();
+				} catch (PDOException $e) {
+					$this->connection->rollBack();
+					error_log($e->getMessage());
+				}
 			break;
 
 			case self::QUEUE_TYPE_BEANSTALKD:
@@ -360,7 +406,7 @@ class Job_Queue {
 	 *
 	 * @param mixed $job
 	 * @return void
-	 * @throws Exception
+	 * @throws PDOException
 	 */
 	public function buryJob($job): void {
 		$this->runPreChecks();
@@ -370,8 +416,20 @@ class Job_Queue {
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$buried_dt = gmdate('Y-m-d H:i:s');
-				$statement = $this->connection->prepare("UPDATE {$table_name} SET is_buried = 1, buried_dt = ?, is_reserved = 0, reserved_dt = NULL WHERE id = ?");
-				$statement->execute([ $buried_dt, $job['id'] ]);
+				
+				// Begin a transaction
+				$this->connection->beginTransaction();
+				
+				try {
+					$statement = $this->connection->prepare("UPDATE {$table_name} SET is_buried = 1, buried_dt = ?, is_reserved = 0, reserved_dt = NULL WHERE id = ?");
+					$statement->execute([ $buried_dt, $job['id'] ]);
+					
+					// Commit the transaction
+					$this->connection->commit();
+				} catch (PDOException $e) {
+					$this->connection->rollBack();
+					error_log($e->getMessage());
+				}
 			break;
 
 			case self::QUEUE_TYPE_BEANSTALKD:
@@ -385,7 +443,7 @@ class Job_Queue {
 	 *
 	 * @param mixed $job
 	 * @return void
-	 * @throws Exception
+	 * @throws PDOException
 	 */
 	public function kickJob($job): void {
 		$this->runPreChecks();
@@ -394,8 +452,20 @@ class Job_Queue {
 			case self::QUEUE_TYPE_PGSQL:
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
-				$statement = $this->connection->prepare("UPDATE {$table_name} SET is_buried = 0, buried_dt = NULL WHERE id = ?");
-				$statement->execute([ $job['id'] ]);
+				
+				// Begin transaction
+				$this->connection->beginTransaction();
+				
+				try {
+					$statement = $this->connection->prepare("UPDATE {$table_name} SET is_buried = 0, buried_dt = NULL WHERE id = ?");
+					$statement->execute([ $job['id'] ]);
+					
+					// Commit transaction
+					$this->connection->commit();
+				} catch (PDOException $e) {
+					$this->connection->rollBack();
+					error_log($e->getMessage());
+				}
 			break;
 
 			case self::QUEUE_TYPE_BEANSTALKD:
