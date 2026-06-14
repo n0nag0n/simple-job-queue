@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "f813fbf0aa37c0b7b30f136df7e7f822",
+    "content-hash": "4eeebac696e9a1c3e5795339c6ac43aa",
     "packages": [
         {
             "name": "pda/pheanstalk",
@@ -1853,15 +1853,15 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": [],
+    "stability-flags": {},
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
+        "php": "^7.4 || ^8.0",
         "ext-pdo": "*"
     },
     "platform-dev": {
-        "ext-pdo": "*",
         "ext-pdo_sqlite": "*"
     },
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.9.0"
 }
