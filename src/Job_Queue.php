@@ -67,7 +67,8 @@ class Job_Queue {
 		$this->setOptions($options + [
 			'mysql' => [
 				'use_compression' => true
-			]
+			],
+			'stale_timeout' => 300
 		]);
 	}
 
@@ -475,6 +476,42 @@ class Job_Queue {
 	}
 
 	/**
+	 * Releases (un-reserves) a job, making it immediately available again.
+	 * Additive method for consistency with Beanstalkd.
+	 *
+	 * @param mixed $job
+	 * @return void
+	 */
+	public function releaseJob($job): void {
+		$this->runPreChecks();
+		switch($this->queue_type) {
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_SQLITE:
+				$table_name = $this->getSqlTableName();
+
+				// Begin transaction
+				$this->connection->beginTransaction();
+
+				try {
+					$statement = $this->connection->prepare("UPDATE {$table_name} SET is_reserved = 0, reserved_dt = NULL WHERE id = ?");
+					$statement->execute([ $job['id'] ]);
+
+					// Commit transaction
+					$this->connection->commit();
+				} catch (PDOException $e) {
+					$this->connection->rollBack();
+					error_log($e->getMessage());
+				}
+			break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				$this->connection->release($job);
+			break;
+		}
+	}
+
+	/**
 	 * Gets the job id from given job
 	 *
 	 * @param mixed $job
@@ -508,6 +545,110 @@ class Job_Queue {
 			case self::QUEUE_TYPE_BEANSTALKD:
 				return $job->getData();
 		}
+	}
+
+	/**
+	 * Returns the number of ready (available) jobs for the pipeline.
+	 * Additive, non-breaking.
+	 */
+	public function getReadyCount(?string $pipeline = null): int {
+		$p = $pipeline ?? $this->pipeline;
+		if (empty($p)) {
+			throw new Exception('Pipeline/Tube needs to be defined first (pass as argument or via selectPipeline/watchPipeline)');
+		}
+		if ($pipeline !== null) {
+			$original = $this->pipeline;
+			$this->selectPipeline($pipeline);
+		}
+		$this->runPreChecks();
+
+		$count = 0;
+		switch($this->queue_type) {
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_SQLITE:
+				$table_name = $this->getSqlTableName();
+				$send_dt = gmdate('Y-m-d H:i:s');
+				$stale = $this->options['stale_timeout'] ?? 300;
+				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -' . $stale . ' seconds'));
+
+				$statement = $this->connection->prepare("SELECT COUNT(*) as cnt FROM {$table_name}
+					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= ? ) ) AND (attempts = 0 OR (attempts >= 1 AND time_to_retry_dt <= ?) )");
+				$statement->execute([ $this->pipeline, $send_dt, $reserved_dt, $send_dt ]);
+				$result = $statement->fetch(PDO::FETCH_ASSOC);
+				$count = (int)($result['cnt'] ?? 0);
+				break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				try {
+					$stats = $this->connection->statsTube($this->pipeline);
+					if (is_array($stats)) {
+						$count = (int)($stats['current-jobs-ready'] ?? 0);
+					} elseif (is_object($stats)) {
+						$data = method_exists($stats, 'getData') ? $stats->getData() : (array)$stats;
+						$count = (int)($data['current-jobs-ready'] ?? 0);
+					}
+				} catch (\Exception $e) {
+					$count = 0;
+				}
+				break;
+		}
+
+		if ($pipeline !== null && isset($original)) {
+			$this->selectPipeline($original);
+		}
+		return $count;
+	}
+
+	/**
+	 * Returns the number of buried jobs for the pipeline.
+	 * Additive, non-breaking.
+	 */
+	public function getBuriedCount(?string $pipeline = null): int {
+		$p = $pipeline ?? $this->pipeline;
+		if (empty($p)) {
+			throw new Exception('Pipeline/Tube needs to be defined first (pass as argument or via selectPipeline/watchPipeline)');
+		}
+		if ($pipeline !== null) {
+			$original = $this->pipeline;
+			$this->selectPipeline($pipeline);
+		}
+		$this->runPreChecks();
+
+		$count = 0;
+		switch($this->queue_type) {
+			case self::QUEUE_TYPE_MYSQL:
+			case self::QUEUE_TYPE_PGSQL:
+			case self::QUEUE_TYPE_SQLITE:
+				$table_name = $this->getSqlTableName();
+				$send_dt = gmdate('Y-m-d H:i:s');
+
+				$statement = $this->connection->prepare("SELECT COUNT(*) as cnt FROM {$table_name}
+					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 1");
+				$statement->execute([ $this->pipeline, $send_dt ]);
+				$result = $statement->fetch(PDO::FETCH_ASSOC);
+				$count = (int)($result['cnt'] ?? 0);
+				break;
+
+			case self::QUEUE_TYPE_BEANSTALKD:
+				try {
+					$stats = $this->connection->statsTube($this->pipeline);
+					if (is_array($stats)) {
+						$count = (int)($stats['current-jobs-buried'] ?? 0);
+					} elseif (is_object($stats)) {
+						$data = method_exists($stats, 'getData') ? $stats->getData() : (array)$stats;
+						$count = (int)($data['current-jobs-buried'] ?? 0);
+					}
+				} catch (\Exception $e) {
+					$count = 0;
+				}
+				break;
+		}
+
+		if ($pipeline !== null && isset($original)) {
+			$this->selectPipeline($original);
+		}
+		return $count;
 	}
 
 	/**

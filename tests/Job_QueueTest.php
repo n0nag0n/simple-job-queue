@@ -545,6 +545,25 @@ class Job_QueueTest extends TestCase {
 		
 		$mockPheanstalk->expects($this->once())->method('kickJob')->with($mockJob);
 		$beanstalkQueue->kickJob($mockJob);
+
+		// Phase 2 additive methods: releaseJob and counts (require proper ResponseInterface for statsTube)
+		$mockPheanstalk->expects($this->once())->method('release')->with($mockJob);
+		$beanstalkQueue->releaseJob($mockJob);
+
+		// Create a proper ResponseInterface implementation for stats (extends ArrayObject to satisfy ArrayAccess + Traversable)
+		$statsResponse = new class extends \ArrayObject implements \Pheanstalk\Contract\ResponseInterface {
+			public function getResponseName(): string {
+				return 'OK';
+			}
+		};
+		$statsResponse->exchangeArray([
+			'current-jobs-ready' => 5,
+			'current-jobs-buried' => 2,
+		]);
+		$mockPheanstalk->method('statsTube')->willReturn($statsResponse);
+
+		$this->assertEquals(5, $beanstalkQueue->getReadyCount());
+		$this->assertEquals(2, $beanstalkQueue->getBuriedCount());
 	}
 
 	public function testEmptyResultsHandling(): void {
@@ -726,6 +745,44 @@ class Job_QueueTest extends TestCase {
 			$cache = $jq->getCache();
 			$this->assertTrue($cache['job-queue-table-check']);
 		}
+	}
+
+	/**
+	 * Tests for new Phase 2 features on sqlite (additive, non-breaking).
+	 */
+	public function testConfigurableStaleTimeout(): void {
+		$this->jq->selectPipeline('pipeline');
+		$opts = $this->jq->getOptions();
+		$this->assertArrayHasKey('stale_timeout', $opts);
+		$this->assertSame(300, $opts['stale_timeout']);
+
+		$custom = new Job_Queue('sqlite', ['stale_timeout' => 60]);
+		$this->assertSame(60, $custom->getOptions()['stale_timeout']);
+	}
+
+	public function testReleaseJobOnSqlite(): void {
+		$this->jq->selectPipeline('pipeline');
+		$job = $this->jq->addJob('{"r":1}', 0, 1024, 0);
+		$reserved = $this->jq->getNextJobAndReserve();
+		$this->assertSame($job['id'], $reserved['id']);
+		$this->assertSame([], $this->jq->getNextJobAndReserve());
+		$this->jq->releaseJob($reserved);
+		$after = $this->jq->getNextJobAndReserve();
+		$this->assertSame($job['id'], $after['id']);
+	}
+
+	public function testGetReadyAndBuriedCounts(): void {
+		$this->jq->selectPipeline('c-p');
+		$this->assertSame(0, $this->jq->getReadyCount());
+		$this->assertSame(0, $this->jq->getBuriedCount());
+
+		$j1 = $this->jq->addJob('{"c":1}', 0, 1024, 0);
+		$this->jq->addJob('{"c":2}', 0, 1024, 0);
+		$this->assertSame(2, $this->jq->getReadyCount());
+
+		$this->jq->buryJob($j1);
+		$this->assertSame(1, $this->jq->getReadyCount());
+		$this->assertSame(1, $this->jq->getBuriedCount());
 	}
 
 	/**
