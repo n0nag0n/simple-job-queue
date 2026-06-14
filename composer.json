@@ -1,6 +1,6 @@
 {
     "name": "n0nag0n/simple-job-queue",
-    "description": "A simple library for interfacing with other job queue providers that gives you plenty of flexibility. Currently supports MySQL",
+    "description": "A simple library for interfacing with other job queue providers that gives you plenty of flexibility. Supports MySQL, PostgreSQL, SQLite, and Beanstalkd.",
     "type": "library",
     "license": "MIT",
     "authors": [
@@ -11,6 +11,7 @@
     ],
     "minimum-stability": "stable",
 	"require": {
+        "php": "^7.4 || ^8.0",
         "ext-pdo": "*",
         "pda/pheanstalk": "^4.0"
     },
@@ -20,7 +21,6 @@
 		} 
     },
     "require-dev": {
-		"ext-pdo": "*",
 		"ext-pdo_sqlite": "*",
         "phpunit/phpunit": "^9.5",
 		"rregeer/phpunit-coverage-check": "^0.3.1"

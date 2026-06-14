@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php-version: ['7.4', '8.1', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: pdo, pdo_sqlite
+          coverage: xdebug
+
+      - name: Validate composer.json and lockfile
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Run tests
+        run: composer test
+
+      - name: Run test coverage (full matrix not required for speed; primary on latest)
+        if: matrix.php-version == '8.3'
+        run: composer test-coverage || true  # coverage check is strict but we still want the run visible

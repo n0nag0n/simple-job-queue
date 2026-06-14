@@ -15,7 +15,7 @@ In order for this to work, you need a way to add jobs to the queue and a way to 
 ```php
 <?php
 
-use n0nag0n\Job_Queue
+use n0nag0n\Job_Queue;
 
 // default is mysql based job queue
 $Job_Queue = new Job_Queue('mysql', [
@@ -36,9 +36,9 @@ $Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => '
 ```php
 <?php
 
-use n0nag0n\Job_Queue
+use n0nag0n\Job_Queue;
 
-// default is mysql based job queue
+// default is pgsql based job queue
 $Job_Queue = new Job_Queue('pgsql', [
 	'pgsql' => [
 		'table_name' => 'new_table_name', // default is job_queue_jobs
@@ -56,9 +56,9 @@ $Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => '
 ```php
 <?php
 
-use n0nag0n\Job_Queue
+use n0nag0n\Job_Queue;
 
-// default is mysql based job queue
+// default is sqlite based job queue
 $Job_Queue = new Job_Queue('sqlite', [
 	'sqlite' => [
 		'table_name' => 'new_table_name' // default is job_queue_jobs
@@ -76,9 +76,9 @@ $Job_Queue->addJob(json_encode([ 'something' => 'that', 'ends' => 'up', 'a' => '
 ```php
 <?php
 
-use n0nag0n\Job_Queue
+use n0nag0n\Job_Queue;
 
-// default is mysql based job queue
+// default is beanstalkd based job queue
 $Job_Queue = new Job_Queue('beanstalkd');
 
 $pheanstalk = Pheanstalk\Pheanstalk::create('127.0.0.1');
@@ -109,6 +109,7 @@ See `example_worker.php` for file or see below:
 		$payload = json_decode($job['payload'], true);
 
 		try {
+			// NOTE: doSomethingThatDoesSomething is an example placeholder for your own job handler.
 			$result = doSomethingThatDoesSomething($payload);
 
 			if($result === true) {
@@ -130,4 +131,7 @@ Supervisord is going to be your jam. Look up the many, many articles on how to i
 PHPUnit Tests with sqlite3 examples for the time being.
 ```
 vendor/bin/phpunit
+# or via composer
+composer test
+composer test-coverage   # requires Xdebug; enforces 100% coverage
 ```

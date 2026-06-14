@@ -549,7 +549,7 @@ class Job_Queue {
 		return $this->queue_type === self::QUEUE_TYPE_BEANSTALKD;
 	}
 
-	protected function getSqlTableName(): string {
+	protected function getRawTableName(): string {
 		$table_name = 'job_queue_jobs';
 		if($this->isMysqlQueueType() && isset($this->options['mysql']['table_name'])) {
 			$table_name = $this->options['mysql']['table_name'];
@@ -558,24 +558,30 @@ class Job_Queue {
 		} else if($this->isSqliteQueueType() && isset($this->options['sqlite']['table_name'])) {
 			$table_name = $this->options['sqlite']['table_name'];
 		}
-		return $this->quoteDatabaseKey($table_name);
+		return $table_name;
+	}
+
+	protected function getSqlTableName(): string {
+		return $this->quoteDatabaseKey($this->getRawTableName());
 	}
 
 	protected function checkAndIfNecessaryCreateJobQueueTable(): void {
 		$cache =& self::$cache;
-		$exists = isset($cache['job-queue-table-check']);
-		if(empty($exists)) {
-			$table_name = $this->getSqlTableName();
+		$raw_table_name = $this->getRawTableName();
+		$table_name = $this->getSqlTableName(); // quoted form for DDL/DML
+		$cache_key = 'job-queue-table-check:' . $this->queue_type . ':' . $raw_table_name;
+
+		if (empty($cache[$cache_key])) {
 			if($this->isMysqlQueueType()) {
 				// Doesn't like this in a prepared statement...
-				$escaped_table_name = $this->connection->quote($table_name);
+				$escaped_table_name = $this->connection->quote($raw_table_name);
 				$statement = $this->connection->query("SHOW TABLES LIKE {$escaped_table_name}");
 			} else if($this->isPgsqlQueueType()) {
-				$escaped_table_name = $this->connection->quote($table_name);
+				$escaped_table_name = $this->connection->quote($raw_table_name);
 				$statement = $this->connection->query("SELECT * FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema' and tablename like {$escaped_table_name}");
 			} else {
 				$statement = $this->connection->prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?");
-				$statement->execute([ $table_name ]);
+				$statement->execute([ $raw_table_name ]);
 			}
 			
 			$has_table = !!count($statement->fetchAll(PDO::FETCH_ASSOC));
@@ -600,9 +606,9 @@ class Job_Queue {
 					);");
 				// pgsql and sqlite
 				} else {
-					$field_type = $this->isSqliteQueueType() ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'serial';
+					$id_field = $this->isSqliteQueueType() ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'SERIAL PRIMARY KEY';
 					$this->connection->exec("CREATE TABLE IF NOT EXISTS {$table_name} (
-						id {$field_type} NOT NULL,
+						id {$id_field} NOT NULL,
 						pipeline TEXT NOT NULL,
 						payload TEXT NOT NULL,
 						added_dt TEXT NOT NULL, -- COMMENT 'In UTC'
@@ -619,7 +625,8 @@ class Job_Queue {
 					$this->connection->exec("CREATE INDEX IF NOT EXISTS pipeline_send_dt_is_buried_is_reserved ON {$table_name} (pipeline, send_dt, is_buried, is_reserved)");
 				}
 			}
-			$cache['job-queue-table-check'] = true;
+			$cache[$cache_key] = true;
+			$cache['job-queue-table-check'] = true; // legacy key for getCache() compat + existing tests
 		}
 	}
 }
