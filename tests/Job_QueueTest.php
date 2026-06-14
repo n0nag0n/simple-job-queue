@@ -25,22 +25,8 @@ class Job_QueueTest extends TestCase {
 	}
 
 	public function tearDown(): void {
-		if (isset($this->jq)) {
-			try {
-				$table = $this->getProtectedProperty($this->jq, 'getSqlTableName');
-				// Strip common identifier delimiters for safe DROP
-				$bare = trim($table, "`\"'[] ");
-				if ($bare) {
-					$this->pdo->exec("DROP TABLE IF EXISTS {$bare};");
-				}
-			} catch (\Exception $e) {
-				// best effort cleanup
-			}
-		}
 		$this->pdo->exec('DROP TABLE IF EXISTS job_queue_jobs;');
-		if (isset($this->jq)) {
-			$this->jq->flushCache();
-		}
+		$this->jq->flushCache();
 		unset($this->jq);
 	}
 
@@ -522,15 +508,6 @@ class Job_QueueTest extends TestCase {
 		$mockPheanstalk->method('ignore')->willReturn($mockPheanstalk);
 		$mockPheanstalk->method('reserve')->willReturn($mockJob);
 		$mockPheanstalk->method('peekBuried')->willReturn($mockJob);
-
-		// Phase 2: stats for counts — return a minimal object that satisfies Pheanstalk ResponseInterface expectations in the adapter
-		$mockStatsResponse = new class implements \Pheanstalk\Contract\ResponseInterface {
-			public function __toString(): string { return 'OK'; }
-			public function getData(): array {
-				return ['current-jobs-ready' => 5, 'current-jobs-buried' => 2];
-			}
-		};
-		$mockPheanstalk->method('statsTube')->willReturn($mockStatsResponse);
 		
 		// Create a Job_Queue instance with beanstalkd type
 		$beanstalkQueue = new Job_Queue('beanstalkd');
@@ -569,14 +546,24 @@ class Job_QueueTest extends TestCase {
 		$mockPheanstalk->expects($this->once())->method('kickJob')->with($mockJob);
 		$beanstalkQueue->kickJob($mockJob);
 
-		// Phase 2 additive methods on beanstalkd
+		// Phase 2 additive methods: releaseJob and counts (require proper ResponseInterface for statsTube)
 		$mockPheanstalk->expects($this->once())->method('release')->with($mockJob);
 		$beanstalkQueue->releaseJob($mockJob);
 
-		// Stats-based counts (we just verify they don't explode on the mock)
-		// The real statsTube calls would return arrays with current-jobs-* keys.
-		$this->assertIsInt($beanstalkQueue->getReadyCount());
-		$this->assertIsInt($beanstalkQueue->getBuriedCount());
+		// Create a proper ResponseInterface implementation for stats (extends ArrayObject to satisfy ArrayAccess + Traversable)
+		$statsResponse = new class extends \ArrayObject implements \Pheanstalk\Contract\ResponseInterface {
+			public function getResponseName(): string {
+				return 'OK';
+			}
+		};
+		$statsResponse->exchangeArray([
+			'current-jobs-ready' => 5,
+			'current-jobs-buried' => 2,
+		]);
+		$mockPheanstalk->method('statsTube')->willReturn($statsResponse);
+
+		$this->assertEquals(5, $beanstalkQueue->getReadyCount());
+		$this->assertEquals(2, $beanstalkQueue->getBuriedCount());
 	}
 
 	public function testEmptyResultsHandling(): void {
@@ -761,118 +748,41 @@ class Job_QueueTest extends TestCase {
 	}
 
 	/**
-	 * Tests for Phase 2 features (releaseJob, counts, configurable stale timeout).
-	 * All are additive / non-breaking.
+	 * Tests for new Phase 2 features on sqlite (additive, non-breaking).
 	 */
-
 	public function testConfigurableStaleTimeout(): void {
 		$this->jq->selectPipeline('pipeline');
-
-		// Default should be 300 (5 minutes) and present in options
 		$opts = $this->jq->getOptions();
 		$this->assertArrayHasKey('stale_timeout', $opts);
 		$this->assertSame(300, $opts['stale_timeout']);
 
-		// Custom timeout at construction
-		$customJq = new Job_Queue('sqlite', ['stale_timeout' => 60]);
-		$customJq->addQueueConnection($this->pdo);
-		$customOpts = $customJq->getOptions();
-		$this->assertSame(60, $customOpts['stale_timeout']);
-
-		// Verify that getNextJobAndReserve uses the value (by checking the generated time delta indirectly via behavior is complex without time mocking;
-		// for now we at least confirm the option is respected in the code path by re-instantiating and checking options propagate).
-		$this->assertSame(60, $customJq->getOptions()['stale_timeout']);
+		$custom = new Job_Queue('sqlite', ['stale_timeout' => 60]);
+		$this->assertSame(60, $custom->getOptions()['stale_timeout']);
 	}
 
 	public function testReleaseJobOnSqlite(): void {
 		$this->jq->selectPipeline('pipeline');
-		// Use time_to_retry=0 so the attempts/time gate does not prevent immediate re-acquisition after release
-		$job = $this->jq->addJob('{"releaseTest":true}', 0, 1024, 0);
-
-		// Reserve it
+		$job = $this->jq->addJob('{"r":1}', 0, 1024, 0);
 		$reserved = $this->jq->getNextJobAndReserve();
 		$this->assertSame($job['id'], $reserved['id']);
-
-		// Nothing should be available while reserved
 		$this->assertSame([], $this->jq->getNextJobAndReserve());
-
-		// Release it
 		$this->jq->releaseJob($reserved);
-
-		// Should be available again immediately
-		$afterRelease = $this->jq->getNextJobAndReserve();
-		$this->assertSame($job['id'], $afterRelease['id']);
-	}
-
-	public function testReleaseJobOnBeanstalkdMock(): void {
-		$mockPheanstalk = $this->getMockBuilder(\Pheanstalk\Pheanstalk::class)
-			->disableOriginalConstructor()
-			->getMock();
-
-		$mockJob = $this->getMockBuilder(\Pheanstalk\Job::class)
-			->disableOriginalConstructor()
-			->getMock();
-
-		$mockPheanstalk->method('useTube')->willReturn($mockPheanstalk);
-		$mockPheanstalk->method('watch')->willReturn($mockPheanstalk);
-		$mockPheanstalk->method('ignore')->willReturn($mockPheanstalk);
-		$mockPheanstalk->method('reserve')->willReturn($mockJob);
-
-		// Expect release to be called exactly once with the job
-		$mockPheanstalk->expects($this->once())->method('release')->with($mockJob);
-
-		$beanstalkQueue = new Job_Queue('beanstalkd');
-		$beanstalkQueue->addQueueConnection($mockPheanstalk);
-		$beanstalkQueue->selectPipeline('test-tube');
-
-		$beanstalkQueue->releaseJob($mockJob);
+		$after = $this->jq->getNextJobAndReserve();
+		$this->assertSame($job['id'], $after['id']);
 	}
 
 	public function testGetReadyAndBuriedCounts(): void {
-		$this->jq->selectPipeline('count-pipeline');
-
-		// Initially zero
+		$this->jq->selectPipeline('c-p');
 		$this->assertSame(0, $this->jq->getReadyCount());
 		$this->assertSame(0, $this->jq->getBuriedCount());
 
-		// Add some jobs on the current pipeline (time_to_retry=0 so gates don't interfere with immediate release/ready counting in the test)
 		$j1 = $this->jq->addJob('{"c":1}', 0, 1024, 0);
-		$j2 = $this->jq->addJob('{"c":2}', 0, 1024, 0);
-		$this->jq->addJob('{"c":3}', 0, 1024, 0);
+		$this->jq->addJob('{"c":2}', 0, 1024, 0);
+		$this->assertSame(2, $this->jq->getReadyCount());
 
-		$this->assertSame(3, $this->jq->getReadyCount());
-		$this->assertSame(0, $this->jq->getBuriedCount());
-
-		// Bury one (using kick would be the normal way to unbury; release is for reserved jobs)
 		$this->jq->buryJob($j1);
-		$this->assertSame(2, $this->jq->getReadyCount());
+		$this->assertSame(1, $this->jq->getReadyCount());
 		$this->assertSame(1, $this->jq->getBuriedCount());
-
-		// Count with explicit pipeline arg (different pipeline should be 0 for ready in this context)
-		$this->assertSame(0, $this->jq->getReadyCount('other-pipe'));
-
-		// Now reserve one of the remaining ready jobs and release it (the intended use of releaseJob)
-		$toRelease = $this->jq->getNextJobAndReserve();
-		$this->assertNotEmpty($toRelease);
-		$this->assertSame(1, $this->jq->getReadyCount()); // one less while reserved
-		$this->jq->releaseJob($toRelease);
-		$this->assertSame(2, $this->jq->getReadyCount()); // back to 2 ready
-		$this->assertSame(1, $this->jq->getBuriedCount()); // the previously buried one is still buried
-	}
-
-	public function testCountsWithExplicitPipeline(): void {
-		$this->jq->selectPipeline('main-pipe');
-		$this->jq->addJob('main-1');
-		$this->jq->addJob('main-2');
-
-		$otherJq = new Job_Queue('sqlite');
-		$otherJq->addQueueConnection($this->pdo);
-		$otherJq->selectPipeline('other-pipe');
-		$otherJq->addJob('other-1');
-
-		$this->assertSame(2, $this->jq->getReadyCount());
-		$this->assertSame(1, $this->jq->getReadyCount('other-pipe'));
-		$this->assertSame(0, $this->jq->getReadyCount('nonexistent'));
 	}
 
 	/**

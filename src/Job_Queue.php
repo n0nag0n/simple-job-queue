@@ -68,7 +68,7 @@ class Job_Queue {
 			'mysql' => [
 				'use_compression' => true
 			],
-			'stale_timeout' => 300   // seconds; used for re-claiming stale reserved jobs (DB backends). Default preserves original 5-minute behavior.
+			'stale_timeout' => 300
 		]);
 	}
 
@@ -266,8 +266,7 @@ class Job_Queue {
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
 				$send_dt = gmdate('Y-m-d H:i:s');
-				$stale = $this->options['stale_timeout'] ?? 300;
-				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -' . $stale . ' seconds'));
+				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -5 minutes'));
 				
 				// Start a transaction to prevent race conditions
 				$this->connection->beginTransaction();
@@ -329,13 +328,13 @@ class Job_Queue {
 				$table_name = $this->getSqlTableName();
 				$field = $this->isMysqlQueueType() && $this->options['mysql']['use_compression'] === true ? 'UNCOMPRESS(payload) payload' : 'payload';
 				$send_dt = gmdate('Y-m-d H:i:s');
-
-				// This is a read-only peek (no state change), so we avoid an unnecessary transaction.
-				// The lock clause is still applied on non-SQLite for consistency with other readers if desired,
-				// but we do not start/commit a transaction here.
-				$lockClause = $this->isSqliteQueueType() ? '' : 'FOR UPDATE';
-
+				
+				// Start a transaction to prevent race conditions
+				$this->connection->beginTransaction();
+				
 				try {
+					$lockClause = $this->isSqliteQueueType() ? '' : 'FOR UPDATE';
+					
 					$statement = $this->connection->prepare("SELECT id, {$field}, added_dt, send_dt, priority, is_reserved, reserved_dt, is_buried, buried_dt
 						FROM {$table_name} 
 						WHERE pipeline = ? AND send_dt <= ? AND is_buried = 1
@@ -349,7 +348,12 @@ class Job_Queue {
 							'payload' => $result['payload']
 						];
 					}
+					
+					// Commit the transaction
+					$this->connection->commit();
 				} catch (PDOException $e) {
+					// Rollback the transaction in case of error
+					$this->connection->rollBack();
 					error_log($e->getMessage());
 				}
 			break;
@@ -473,9 +477,7 @@ class Job_Queue {
 
 	/**
 	 * Releases (un-reserves) a job, making it immediately available again.
-	 * This is the symmetric operation to buryJob for jobs that were just reserved.
-	 * For DB backends it clears the reservation flags.
-	 * For Beanstalkd it delegates to the native release.
+	 * Additive method for consistency with Beanstalkd.
 	 *
 	 * @param mixed $job
 	 * @return void
@@ -546,24 +548,19 @@ class Job_Queue {
 	}
 
 	/**
-	 * Returns the number of ready (available) jobs in the (optionally specified) pipeline.
-	 * This is an additive method and does not change any existing behavior.
-	 *
-	 * @param string|null $pipeline
-	 * @return int
+	 * Returns the number of ready (available) jobs for the pipeline.
+	 * Additive, non-breaking.
 	 */
 	public function getReadyCount(?string $pipeline = null): int {
 		$p = $pipeline ?? $this->pipeline;
 		if (empty($p)) {
 			throw new Exception('Pipeline/Tube needs to be defined first (pass as argument or via selectPipeline/watchPipeline)');
 		}
-
-		$this->runPreChecks(); // ensures connection; we may have temporarily changed pipeline above
-		// If a specific pipeline was passed we still need to ensure it's the active one for the count query
 		if ($pipeline !== null) {
 			$original = $this->pipeline;
 			$this->selectPipeline($pipeline);
 		}
+		$this->runPreChecks();
 
 		$count = 0;
 		switch($this->queue_type) {
@@ -572,7 +569,8 @@ class Job_Queue {
 			case self::QUEUE_TYPE_SQLITE:
 				$table_name = $this->getSqlTableName();
 				$send_dt = gmdate('Y-m-d H:i:s');
-				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -' . ($this->options['stale_timeout'] ?? 300) . ' seconds'));
+				$stale = $this->options['stale_timeout'] ?? 300;
+				$reserved_dt = gmdate('Y-m-d H:i:s', strtotime('now -' . $stale . ' seconds'));
 
 				$statement = $this->connection->prepare("SELECT COUNT(*) as cnt FROM {$table_name}
 					WHERE pipeline = ? AND send_dt <= ? AND is_buried = 0 AND (is_reserved = 0 OR (is_reserved = 1 AND reserved_dt <= ? ) ) AND (attempts = 0 OR (attempts >= 1 AND time_to_retry_dt <= ?) )");
@@ -584,14 +582,11 @@ class Job_Queue {
 			case self::QUEUE_TYPE_BEANSTALKD:
 				try {
 					$stats = $this->connection->statsTube($this->pipeline);
-					// Pheanstalk stats responses are usually array-like or have data; be defensive
 					if (is_array($stats)) {
 						$count = (int)($stats['current-jobs-ready'] ?? 0);
 					} elseif (is_object($stats)) {
 						$data = method_exists($stats, 'getData') ? $stats->getData() : (array)$stats;
 						$count = (int)($data['current-jobs-ready'] ?? 0);
-					} else {
-						$count = 0;
 					}
 				} catch (\Exception $e) {
 					$count = 0;
@@ -606,18 +601,14 @@ class Job_Queue {
 	}
 
 	/**
-	 * Returns the number of buried jobs in the (optionally specified) pipeline.
-	 * This is an additive method and does not change any existing behavior.
-	 *
-	 * @param string|null $pipeline
-	 * @return int
+	 * Returns the number of buried jobs for the pipeline.
+	 * Additive, non-breaking.
 	 */
 	public function getBuriedCount(?string $pipeline = null): int {
 		$p = $pipeline ?? $this->pipeline;
 		if (empty($p)) {
 			throw new Exception('Pipeline/Tube needs to be defined first (pass as argument or via selectPipeline/watchPipeline)');
 		}
-
 		if ($pipeline !== null) {
 			$original = $this->pipeline;
 			$this->selectPipeline($pipeline);
@@ -647,8 +638,6 @@ class Job_Queue {
 					} elseif (is_object($stats)) {
 						$data = method_exists($stats, 'getData') ? $stats->getData() : (array)$stats;
 						$count = (int)($data['current-jobs-buried'] ?? 0);
-					} else {
-						$count = 0;
 					}
 				} catch (\Exception $e) {
 					$count = 0;
@@ -717,12 +706,6 @@ class Job_Queue {
 		return $this->quoteDatabaseKey($this->getRawTableName());
 	}
 
-	/**
-	 * IMPORTANT: This method must NEVER alter existing tables or break long-running setups.
-	 * Only CREATE TABLE IF NOT EXISTS is used. All schema definitions inside the creation
-	 * blocks only affect brand-new tables. Existing MySQL/Postgres/SQLite installations
-	 * (with historical data) must continue to work unchanged.
-	 */
 	protected function checkAndIfNecessaryCreateJobQueueTable(): void {
 		$cache =& self::$cache;
 		$raw_table_name = $this->getRawTableName();
@@ -776,7 +759,7 @@ class Job_Queue {
 						reserved_dt TEXT NULL, -- COMMENT 'In UTC'
 						is_buried INTEGER NOT NULL,
 						buried_dt TEXT NULL, -- COMMENT 'In UTC'
-						time_to_retry_dt TEXT NULL, -- matches MySQL semantics for new tables only
+						time_to_retry_dt TEXT NOT NULL,
 						attempts INTEGER NOT NULL
 					);");
 					
