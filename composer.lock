@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4eeebac696e9a1c3e5795339c6ac43aa",
+    "content-hash": "1deb89400f1ee20232a060afad31b830",
     "packages": [
         {
             "name": "pda/pheanstalk",

@@ -12,9 +12,11 @@
     "minimum-stability": "stable",
 	"require": {
         "php": "^7.4 || ^8.0",
-        "ext-pdo": "*",
-        "pda/pheanstalk": "^4.0"
+        "ext-pdo": "*"
     },
+	"suggest": {
+		"pda/pheanstalk": "^4.0 for Beanstalkd queue support"
+	},
 	"autoload": {
         "psr-4": {
 			"n0nag0n\\" : "src/"
@@ -22,7 +24,7 @@
     },
     "require-dev": {
 		"ext-pdo_sqlite": "*",
-        "phpunit/phpunit": "^9.5",
+        "phpunit/phpunit": "^9.6",
 		"rregeer/phpunit-coverage-check": "^0.3.1"
     },
 	"scripts": {

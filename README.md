@@ -6,6 +6,10 @@ I wanted/needed a simple job queue that could be used on a database, but also us
 composer require n0nag0n/simple-job-queue
 ```
 
+**Requirements:** PHP 7.4 or higher.
+
+> **Note on Beanstalkd:** The `pda/pheanstalk` package is only needed if you use the Beanstalkd adapter. It is listed under `suggest` in `composer.json` (not a hard requirement) so pure database users are not forced to install it.
+
 ## Usage
 
 In order for this to work, you need a way to add jobs to the queue and a way to process the jobs (a worker). Below are examples of how to add a job to the queue and how to process the job.
@@ -126,6 +130,30 @@ See `example_worker.php` for file or see below:
 
 ### Handling long processes
 Supervisord is going to be your jam. Look up the many, many articles on how to implement this.
+
+### Configurable options
+Several behaviors can be tuned via the `$options` array passed to the constructor (or `setOptions()`):
+
+- `stale_timeout` (int, seconds): How long to wait before a reserved job is considered "stale" and can be re-claimed by another worker (DB backends only). Default: `300` (5 minutes). This default preserves the historical behavior exactly.
+
+Example:
+```php
+$Job_Queue = new Job_Queue('mysql', [
+    'stale_timeout' => 120,           // 2 minutes
+    'mysql' => [ 'use_compression' => true ]
+]);
+```
+
+### Additional methods (additive, non-breaking)
+New methods have been added that do not change any existing behavior:
+
+- `releaseJob($job)` — Un-reserves a job that was previously obtained via `getNextJobAndReserve()`, making it available again immediately (useful if processing was abandoned).
+- `getReadyCount(?string $pipeline = null): int`
+- `getBuriedCount(?string $pipeline = null): int`
+
+These work for all supported backends. Pass a pipeline name to query a specific one, or omit to use the currently selected pipeline.
+
+See the source or tests for usage examples. All new functionality follows the same "select/watch pipeline + connection" contract as the rest of the library.
 
 ### Testing
 PHPUnit Tests with sqlite3 examples for the time being.
